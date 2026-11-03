@@ -23,10 +23,10 @@
     // contain updates from several participants, not just the final card.
     for(const block of blocks(r)){
       const l=lines(block);if(l.length<2)continue;
-      const speaker=l[0].replace(/\\s*\\(you\\)\\s*$/i,'').trim();
-      const text=l.slice(1).join(' ').replace(/\\s+/g,' ').trim();
+      const speaker=l[0].replace(/\s*\(you\)\s*$/i,'').trim();
+      const text=l.slice(1).join(' ').replace(/\s+/g,' ').trim();
       if(!speaker||!text||speaker.length>80||text.length>2000)continue;
-      const fingerprint=speaker.toLocaleLowerCase()+'|'+text.toLocaleLowerCase().normalize('NFKC').replace(/\\s+/g,' ').trim();
+      const fingerprint=speaker.toLocaleLowerCase()+'|'+text.toLocaleLowerCase().normalize('NFKC').replace(/\s+/g,' ').trim();
       if(lastTextByNode.get(block)===fingerprint)continue;
       lastTextByNode.set(block,fingerprint);
       const now=Date.now(),previous=seenCaptionFingerprints.get(fingerprint);
