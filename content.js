@@ -1,15 +1,16 @@
 (() => {
   if(window.__meetNotebookLoaded)return;window.__meetNotebookLoaded=true;
   const SELECTORS={regions:['[role="region"][aria-label*="caption" i]','[aria-label="Captions"]','[aria-label*="caption" i][role="group"]','[aria-live]'],buttons:['button[aria-label*="turn on captions" i]','button[aria-label*="turn off captions" i]'],tiles:['[data-participant-id]','[data-self-name]','[role="listitem"][aria-label]']};
-  let entries=[],active=null,observer=null,observedRegion=null,rootObserver=null,persistTimer=null,reattachTimer=null,stableTimer=null,publishTimer=null,sessionId=null,elapsedBeforePause=0,activeSegmentStart=0,paused=false,hideNativeCaptions=true;\n  const originalCaptionStyles=new WeakMap();
+  let entries=[],active=null,observer=null,observedRegion=null,rootObserver=null,persistTimer=null,reattachTimer=null,stableTimer=null,publishTimer=null,sessionId=null,elapsedBeforePause=0,activeSegmentStart=0,paused=false,hideNativeCaptions=true;
+  const originalCaptionStyles=new WeakMap();
   const elapsed=()=>Math.max(0,Math.floor((elapsedBeforePause+(activeSegmentStart?performance.now()-activeSegmentStart:0))/1000));
   const region=()=>{for(const sel of SELECTORS.regions){const el=document.querySelector(sel);if(el&&((el.getAttribute('aria-label')||'').toLowerCase().includes('caption')||el.querySelector('img,[role="img"]')))return el;}return null;};
   function setCaptionVisibility(hide){
     hideNativeCaptions=!!hide;
     const r=region();if(!r)return;
-    if(!originalCaptionStyles.has(r))originalCaptionStyles.set(r,{visibility:r.style.getPropertyValue('visibility'),visibilityPriority:r.style.getPropertyPriority('visibility'),pointerEvents:r.style.getPropertyValue('pointer-events'),pointerEventsPriority:r.style.getPropertyPriority('pointer-events')});
-    if(hide){r.style.setProperty('visibility','hidden','important');r.style.setProperty('pointer-events','none','important');}
-    else{const old=originalCaptionStyles.get(r);old.visibility?r.style.setProperty('visibility',old.visibility,old.visibilityPriority):r.style.removeProperty('visibility');old.pointerEvents?r.style.setProperty('pointer-events',old.pointerEvents,old.pointerEventsPriority):r.style.removeProperty('pointer-events');}
+    if(!originalCaptionStyles.has(r))originalCaptionStyles.set(r,{opacity:r.style.getPropertyValue('opacity'),opacityPriority:r.style.getPropertyPriority('opacity'),pointerEvents:r.style.getPropertyValue('pointer-events'),pointerEventsPriority:r.style.getPropertyPriority('pointer-events')});
+    if(hide){r.style.setProperty('opacity','0','important');r.style.setProperty('pointer-events','none','important');}
+    else{const old=originalCaptionStyles.get(r);old.opacity?r.style.setProperty('opacity',old.opacity,old.opacityPriority):r.style.removeProperty('opacity');old.pointerEvents?r.style.setProperty('pointer-events',old.pointerEvents,old.pointerEventsPriority):r.style.removeProperty('pointer-events');}
   }
   function enableCaptions(){const bs=SELECTORS.buttons.flatMap(s=>[...document.querySelectorAll(s)]);if(bs.some(b=>/turn off captions/i.test(b.getAttribute('aria-label')||'')))return true;const b=bs.find(x=>/turn on captions/i.test(x.getAttribute('aria-label')||''));if(b){b.click();return true;}return false;}
   const junk=/^(jump to bottom|caption settings|format size|settings|arrow_downward|more options|mic|volume up)$/i;
