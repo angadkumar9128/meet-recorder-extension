@@ -4,9 +4,21 @@
 <header><div><strong>Meet Notebook</strong><small id="meeting">No meeting selected</small></div><div id="clock"><i id="dot"></i><span id="timer">00:00:00</span></div></header>
 <nav><button class="tab active" data-view="live">Live notes</button><button class="tab" data-view="past">Past meetings</button><button class="tab" data-view="settings">Settings</button></nav>
 <main id="live"><section class="controls"><div><button id="start" class="primary">Start</button><button id="pause" disabled>Pause</button><button id="stop" class="danger" disabled>Stop</button></div><p id="status">Open a Meet tab to begin.</p><div class="meters"><label>Meet <meter id="tabMeter" min="0" max="1" value="0"></meter></label><label>Mic <meter id="micMeter" min="0" max="1" value="0"></meter></label></div></section>
+<section id="playbackPanel" class="playback" hidden><strong>Recording playback</strong><video id="player" controls preload="metadata"></video><small>Use the video timeline to seek. Playback is available after recording is finalized.</small></section>
 <input id="search" type="search" placeholder="Search transcript…"><div id="transcript"><p class="empty">Live captions will appear here when Meet captions are enabled.</p></div>
 <div class="note"><textarea id="manualNote" rows="2" placeholder="Add a note…"></textarea><button id="addNote">Add</button></div>
-<footer><button data-format="txt">TXT</button><button data-format="md">MD</button><button data-format="json">JSON</button><button id="copy">Copy</button><button id="video">Video</button></footer></main>
+<footer><button data-format="txt">TXT</button><button data-format="md">MD</button><button data-format="json">JSON</button><button id="copy">Copy</button><button id="video">Play / seek</button></footer></main>
 <main id="past" hidden><div id="sessions"></div></main>
-<main id="settings" hidden><label>Your name<input id="myName" placeholder="Your display name"></label><label>Video quality<select id="quality"><option value="high">High — 1080p target / 8 Mbps</option><option value="standard">Standard — 720p / 4 Mbps</option><option value="saver">Data saver — 720p / 2 Mbps</option></select></label><label>Theme<select id="theme"><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select></label><p class="privacy">Recordings and transcripts stay in this browser. Tell all participants before recording.</p><button id="save" class="primary">Save settings</button><button id="diagnostics">Copy caption diagnostics</button></main>
+<main id="settings" hidden>
+<label>Your name<input id="myName" placeholder="Your display name"></label>
+<label>Video quality<select id="quality"><option value="high">High — 1080p target / 8 Mbps</option><option value="standard">Standard — 720p / 4 Mbps</option><option value="saver">Data saver — 720p / 2 Mbps</option></select></label>
+<label>Theme<select id="theme"><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select></label>
+<label class="range-label">Microphone sensitivity <output id="gainValue">2.0×</output><input id="micGain" type="range" min="0.5" max="5" step="0.1" value="2"></label>
+<label class="check-label"><input id="autoGain" type="checkbox" checked> Automatic gain for quiet speech</label>
+<label class="check-label"><input id="enhanceMic" type="checkbox" checked> Voice enhancement (noise filter + compression)</label>
+<button id="micSetup">Test microphone / grant access</button>
+<p class="hint">Sensitivity and voice enhancement affect the recorded microphone track. Google Meet generates its own live captions from the microphone device selected in Meet; this extension cannot directly change Meet's speech-recognition model or guarantee recognition of every fast/quiet word. For best captions, select the correct language and microphone in Meet settings.</p>
+<p class="privacy">Recordings and transcripts stay in this browser. Tell all participants before recording.</p>
+<button id="save" class="primary">Save settings</button><button id="diagnostics">Copy caption diagnostics</button>
+</main>
 <script src="sidepanel.js"></script></body></html>
