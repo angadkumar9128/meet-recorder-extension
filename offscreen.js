@@ -14,7 +14,7 @@ function rms(analyser,data){if(!analyser||!data)return 0;analyser.getFloatTimeDo
 function monitorLevels(){
   if(!audioContext||audioContext.state==='closed')return;
   const mic=rms(micAnalyser,micData),tab=rms(tabAnalyser,tabData);
-  if(micGainNode&&autoGain&&mic>0.0015){const target=clamp(.085/mic,1,3.2);micGainNode.gain.setTargetAtTime(clamp(baseMicGain*target,.5,5),audioContext.currentTime,.22);}
+  if(micGainNode&&autoGain&&mic>0.00025){const target=clamp(.085/mic,1,3.2);micGainNode.gain.setTargetAtTime(clamp(baseMicGain*target,.5,5),audioContext.currentTime,.22);}
   chrome.runtime.sendMessage({type:'AUDIO_LEVELS',mic:clamp(mic*7,0,1),tab:clamp(tab*7,0,1)}).catch(()=>{});
 }
 function readVint(data,pos,isId=false){if(pos>=data.length)return null;const first=data[pos];let mask=0x80,len=1;while(len<=8&&(first&mask)===0){mask>>=1;len++;}if(len>8||pos+len>data.length)return null;let value=isId?first:first&(mask-1);for(let i=1;i<len;i++)value=value*256+data[pos+i];const unknown=!isId&&value===Math.pow(2,7*len)-1;return {length:len,value,unknown};}
@@ -62,7 +62,7 @@ async function start(msg){
   tabStream=await navigator.mediaDevices.getUserMedia({audio:{mandatory:{chromeMediaSource:'tab',chromeMediaSourceId:msg.streamId}},video:{mandatory:{chromeMediaSource:'tab',chromeMediaSourceId:msg.streamId}}});
   const video=tabStream.getVideoTracks()[0];if(!video)throw new Error('Meet did not provide a video track.');video.contentHint='detail';
   try{await video.applyConstraints({width:{ideal:preset.width},height:{ideal:preset.height},frameRate:{ideal:30,max:30}});}catch(e){console.warn('Meet Notebook: capture constraints were not accepted.',e);}
-  let micOk=true;try{micStream=await navigator.mediaDevices.getUserMedia({audio:{...(msg.micDeviceId?{deviceId:{exact:msg.micDeviceId}}:{}),echoCancellation:true,noiseSuppression:enhanceMic,autoGainControl:true,channelCount:1}});}catch(e){micOk=false;console.warn('Meet Notebook: microphone unavailable.',e);}
+  let micOk=true;const micAudio={echoCancellation:true,noiseSuppression:enhanceMic,autoGainControl:true,channelCount:1};try{micStream=await navigator.mediaDevices.getUserMedia({audio:{...micAudio,...(msg.micDeviceId?{deviceId:{exact:msg.micDeviceId}}:{})}});}catch(firstError){if(msg.micDeviceId){try{micStream=await navigator.mediaDevices.getUserMedia({audio:micAudio});}catch(e){micOk=false;console.warn('Meet Notebook: microphone unavailable.',e);}}else{micOk=false;console.warn('Meet Notebook: microphone unavailable.',firstError);}}
   audioContext=new AudioContext({sampleRate:48000});await audioContext.resume();
   const destination=audioContext.createMediaStreamDestination(),mixBus=audioContext.createGain(),limiter=audioContext.createDynamicsCompressor();
   limiter.threshold.value=-8;limiter.knee.value=8;limiter.ratio.value=10;limiter.attack.value=.003;limiter.release.value=.22;
