@@ -10,8 +10,8 @@ test('plain text export puts every speaker turn in its own paragraph',()=>{
     {speaker:'sharmas mulla',text:'how r u Can u Tel MI something about yourself? What are you doing? Where are you working?',t:0},
     {speaker:'Angad Kumar',text:'How r u and what is your weakness? if someone is joining later',t:12}
   ];
-  assert.equal(formatPlainText(entries,'Angad Kumar'),'sharmas mulla - how r u Can u Tel MI something about yourself? What are you doing? Where are you working?\\n\\nAngad Kumar - How r u and what is your weakness? if someone is joining later\\n');
+  assert.equal(formatPlainText(entries,'Angad Kumar'),'sharmas mulla - how r u Can u Tel MI something about yourself? What are you doing? Where are you working?\n\nAngad Kumar - How r u and what is your weakness? if someone is joining later\n');
 });
 test('plain text export removes accidental internal line breaks and spacing',()=>{
-  assert.equal(formatPlainText([{speaker:' Speaker  One ',text:' first line\\n   second   line '}]),'Speaker  One - first line second line\\n');
+  assert.equal(formatPlainText([{speaker:' Speaker  One ',text:' first line\n   second   line '}]),'Speaker  One - first line second line\n');
 });
