@@ -103,6 +103,16 @@ async function settings(){
 }
 $('micGain').oninput=()=>$('gainValue').textContent=Number($('micGain').value).toFixed(1)+'×';
 $('theme').onchange=()=>{document.body.dataset.theme=$('theme').value==='system'?'':$('theme').value;};
+$('installSpeechPack').onclick=async()=>{
+  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;const lang=$('captionLanguage').value;
+  if(!SR||typeof SR.available!=='function'||typeof SR.install!=='function'){$('status').textContent='This Chrome build does not expose on-device speech recognition.';return;}
+  try{const options={langs:[lang],processLocally:true,quality:'dictation'};const availability=await SR.available(options);
+    if(availability==='available'){$('status').textContent='The local '+lang+' dictation model is already installed.';return;}
+    if(availability==='unavailable')throw new Error('Chrome does not offer a local dictation pack for '+lang+'.');
+    $('status').textContent='Installing Chrome’s local '+lang+' dictation model…';const ok=await SR.install(options);if(!ok)throw new Error('Language-pack installation failed.');
+    $('status').textContent='Local '+lang+' speech model installed. It will be used for the next recording.';
+  }catch(e){$('status').textContent=e.message||String(e);}
+};
 $('micSetup').onclick=()=>chrome.tabs.create({url:chrome.runtime.getURL('setup.html')});
 $('save').onclick=async()=>{
   const s={myName:$('myName').value.trim(),quality:$('quality').value,theme:$('theme').value,micGain:Number($('micGain').value),autoGain:$('autoGain').checked,enhanceMic:$('enhanceMic').checked,localTranscription:$('localTranscription').checked,captionLanguage:$('captionLanguage').value};
