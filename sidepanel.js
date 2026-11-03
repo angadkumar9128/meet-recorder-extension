@@ -1,5 +1,5 @@
 const $=id=>document.getElementById(id);
-let state={recording:false,paused:false,elapsedMs:0},sessionId=null,entries=[],timer=null,scrollLatest=true,playerUrl=null;
+let state={recording:false,paused:false,elapsedMs:0},sessionId=null,entries=[],timer=null,scrollLatest=true,playerUrl=null,localRecognizer=null,localAsrEnabled=false,localAsrLang='en-US',localAsrRestart=null;
 const fmt=ms=>{const n=Math.floor(ms/1000),p=x=>String(x).padStart(2,'0');return p(Math.floor(n/3600))+':'+p(Math.floor(n%3600/60))+':'+p(n%60);};
 const elapsed=()=>Math.max(0,(state.elapsedMs||0)+(state.recording&&!state.paused&&state.segmentStartedAt?Date.now()-state.segmentStartedAt:0));
 async function request(type,extra={}){const r=await chrome.runtime.sendMessage({type,...extra});if(r&&r.ok===false)throw new Error(r.error||'Request failed');return r;}
@@ -29,15 +29,15 @@ async function playback(id){
   try{const blob=await readVideo(id);if(!blob)throw new Error('Playback file is not available in local storage for this meeting.');if(playerUrl)URL.revokeObjectURL(playerUrl);playerUrl=URL.createObjectURL(blob);$('player').src=playerUrl;$('playbackPanel').hidden=false;$('player').load();$('playbackPanel').scrollIntoView({behavior:'smooth',block:'nearest'});$('status').textContent='Recording ready. Use the video timeline to seek.';}catch(e){$('status').textContent=e.message;}
 }
 $('start').onclick=async()=>{
-  try{const tab=await activeMeet();const settings=await chrome.storage.local.get(['myName','quality','micGain','autoGain','enhanceMic','micDeviceId']);const streamId=await chrome.tabCapture.getMediaStreamId({targetTabId:tab.id});
+  try{const tab=await activeMeet();const settings=await chrome.storage.local.get(['myName','quality','micGain','autoGain','enhanceMic','micDeviceId','localTranscription','captionLanguage']);const streamId=await chrome.tabCapture.getMediaStreamId({targetTabId:tab.id});
     const r=await request('START',{tabId:tab.id,streamId,myName:settings.myName,quality:settings.quality||'high',micGain:settings.micGain??2,autoGain:settings.autoGain!==false,enhanceMic:settings.enhanceMic!==false,micDeviceId:settings.micDeviceId||null});
-    sessionId=r.sessionId;await refresh();if(!r.micOk)$('status').textContent='Recording started, but microphone access was denied. Open Settings → Test microphone / grant access, then start a new recording.';else if(!r.transcriptOk)$('status').textContent='Recording started, but Meet captions could not be attached. Reload the Meet tab and try again.';
+    sessionId=r.sessionId;await refresh();if(settings.localTranscription)await startLocalAsr(settings.captionLanguage||'en-US');if(!r.micOk)$('status').textContent='Recording started, but microphone access was denied. Open Settings → Test microphone / grant access, then start a new recording.';else if(!r.transcriptOk)$('status').textContent='Recording started, but Meet captions could not be attached. Reload the Meet tab and try again.';
   }catch(e){$('status').textContent=e.message;}
 };
-$('pause').onclick=async()=>{try{await request(state.paused?'RESUME':'PAUSE');await refresh();}catch(e){$('status').textContent=e.message;}};
-$('stop').onclick=async()=>{try{await request('STOP');await refresh();$('status').textContent='Finalizing video…';}catch(e){$('status').textContent=e.message;}};
+$('pause').onclick=async()=>{try{const resuming=state.paused;await request(resuming?'RESUME':'PAUSE');await refresh();if(resuming){const s=await chrome.storage.local.get(['localTranscription','captionLanguage']);if(s.localTranscription)await startLocalAsr(s.captionLanguage||'en-US');}else stopLocalAsr(false);}catch(e){$('status').textContent=e.message;}};
+$('stop').onclick=async()=>{try{stopLocalAsr(true);await request('STOP');await refresh();$('status').textContent='Finalizing video…';}catch(e){$('status').textContent=e.message;}};
 $('search').oninput=render;$('transcript').onscroll=()=>{scrollLatest=$('transcript').scrollHeight-$('transcript').scrollTop-$('transcript').clientHeight<35;};
-$('addNote').onclick=async()=>{const text=$('manualNote').value.trim();if(!text)return;entries.push({speaker:'My note',text,t:Math.floor(elapsed()/1000),committed:true,note:true});$('manualNote').value='';render();try{await request('TRANSCRIPT_UPDATE',{sessionId,entries});}catch(e){$('status').textContent='Note added locally but could not be saved: '+e.message;}};
+$('addNote').onclick=async()=>{const text=$('manualNote').value.trim();if(!text)return;const entry={speaker:'My note',text,t:Math.floor(elapsed()/1000),committed:true,note:true,source:'note'};$('manualNote').value='';try{await request('NOTE_UPDATE',{sessionId,entry});const latest=await request('GET_TRANSCRIPT',{sessionId});entries=latest.entries||[];render();}catch(e){$('status').textContent='Note could not be saved: '+e.message;}};
 document.querySelectorAll('[data-format]').forEach(b=>b.onclick=async()=>{try{await request('DOWNLOAD_TRANSCRIPT',{sessionId,format:b.dataset.format});}catch(e){$('status').textContent=e.message;}});
 $('copy').onclick=()=>navigator.clipboard.writeText(entries.map(e=>e.speaker+' - '+e.text).join('\\n\\n'));
 $('video').onclick=()=>{if(sessionId)playback(sessionId);else $('status').textContent='Start and stop a recording before opening playback.';};
@@ -54,14 +54,14 @@ async function loadSessions(){
   }
 }
 async function settings(){
-  const s=await chrome.storage.local.get(['myName','quality','theme','micGain','autoGain','enhanceMic']);
-  $('myName').value=s.myName||'';$('quality').value=s.quality||'high';$('theme').value=s.theme||'system';$('micGain').value=s.micGain??2;$('gainValue').textContent=(Number($('micGain').value)).toFixed(1)+'×';$('autoGain').checked=s.autoGain!==false;$('enhanceMic').checked=s.enhanceMic!==false;document.body.dataset.theme=s.theme==='system'?'':s.theme;
+  const s=await chrome.storage.local.get(['myName','quality','theme','micGain','autoGain','enhanceMic','localTranscription','captionLanguage']);
+  $('myName').value=s.myName||'';$('quality').value=s.quality||'high';$('theme').value=s.theme||'system';$('micGain').value=s.micGain??2;$('gainValue').textContent=(Number($('micGain').value)).toFixed(1)+'×';$('autoGain').checked=s.autoGain!==false;$('enhanceMic').checked=s.enhanceMic!==false;$('localTranscription').checked=s.localTranscription===true;$('captionLanguage').value=s.captionLanguage||'en-US';document.body.dataset.theme=s.theme==='system'?'':s.theme;
 }
 $('micGain').oninput=()=>$('gainValue').textContent=Number($('micGain').value).toFixed(1)+'×';
 $('theme').onchange=()=>{document.body.dataset.theme=$('theme').value==='system'?'':$('theme').value;};
 $('micSetup').onclick=()=>chrome.tabs.create({url:chrome.runtime.getURL('setup.html')});
 $('save').onclick=async()=>{
-  const s={myName:$('myName').value.trim(),quality:$('quality').value,theme:$('theme').value,micGain:Number($('micGain').value),autoGain:$('autoGain').checked,enhanceMic:$('enhanceMic').checked};
+  const s={myName:$('myName').value.trim(),quality:$('quality').value,theme:$('theme').value,micGain:Number($('micGain').value),autoGain:$('autoGain').checked,enhanceMic:$('enhanceMic').checked,localTranscription:$('localTranscription').checked,captionLanguage:$('captionLanguage').value};
   await chrome.storage.local.set(s);document.body.dataset.theme=s.theme==='system'?'':s.theme;$('status').textContent='Settings saved. Audio changes apply to the next recording.';
 };
 $('diagnostics').onclick=async()=>{try{const tab=await activeMeet();const r=await request('DIAGNOSE',{tabId:tab.id});if(!r.found)throw new Error('Meet captions were not found. Turn on CC.');await navigator.clipboard.writeText(r.html);$('status').textContent='Sanitized diagnostics copied.';}catch(e){$('status').textContent=e.message;}};
@@ -69,4 +69,4 @@ chrome.storage.onChanged.addListener((changes,area)=>{
   if(area==='local'){const c=changes['transcript:'+sessionId];if(c){entries=c.newValue||[];render();}if(changes.tabAudioLevel)$('tabMeter').value=changes.tabAudioLevel.newValue||0;if(changes.micAudioLevel)$('micMeter').value=changes.micAudioLevel.newValue||0;}
   if(area==='session'&&changes.state){state={...state,...changes.state.newValue};sessionId=state.sessionId||sessionId;renderState();}
 });
-(async()=>{await settings();await refresh();})();
+(async()=>{await settings();await refresh();if(state.recording&&!state.paused){const s=await chrome.storage.local.get(['localTranscription','captionLanguage']);if(s.localTranscription)await startLocalAsr(s.captionLanguage||'en-US');}})();
