@@ -65,6 +65,11 @@ chrome.runtime.onMessage.addListener((msg,sender,reply)=>{
         const s=await getState();const id=msg.sessionId||s.sessionId;if(!id)throw new Error('No active meeting session.');
         const entries=msg.entries||[];await chrome.storage.local.set({['transcript:'+id]:entries});await saveSession({...s,sessionId:id},entries,s.recording?'recording':'saved');reply({ok:true});break;
       }
+      case 'ROSTER_UPDATE':{
+        const d=await chrome.storage.local.get('sessions');const rows=d.sessions||[];const i=rows.findIndex(x=>x.id===msg.sessionId);
+        if(i>=0){rows[i]={...rows[i],participants:msg.participants||[]};await chrome.storage.local.set({sessions:rows});}
+        reply({ok:true});break;
+      }
       case 'LIST_SESSIONS':{const d=await chrome.storage.local.get('sessions');reply({sessions:d.sessions||[]});break;}
       case 'DOWNLOAD_TRANSCRIPT':await downloadTranscript(msg.sessionId,msg.format||'txt');reply({ok:true});break;
       case 'DELETE_SESSION':{const d=await chrome.storage.local.get('sessions');await chrome.storage.local.set({sessions:(d.sessions||[]).filter(x=>x.id!==msg.sessionId)});reply({ok:true});break;}
