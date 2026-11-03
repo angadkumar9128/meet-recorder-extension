@@ -14,7 +14,7 @@ A local-first Chrome Manifest V3 extension for Google Meet recording and speaker
 - Chrome Side Panel with live transcript, pause-aware timer, start/pause/resume/stop controls and past meetings.
 - Meet captions observed through MutationObserver, with reattachment when Meet rebuilds the caption region and faster caption update handling.
 - Word-overlap stitching, speaker turn merging and transcript timestamps that exclude paused time.
-- Local tab-audio capture plus optional microphone capture, device selection, live input meters, adjustable mic sensitivity, automatic gain and voice filtering/compression.
+- Local tab-audio capture plus optional microphone capture, device selection, live input meters, adjustable mic sensitivity, automatic gain and voice filtering/compression.\n- Optional Chrome on-device dictation for the user's own voice (language-pack availability varies); results are labelled separately from Meet's speaker-attributed captions.
 - 48 kHz Web Audio mixing with a final dynamics limiter.
 - MP4 H.264/AAC when supported, otherwise VP8/Opus WebM.
 - WebM duration metadata and cue-point generation on finalization to improve the native seek timeline.
@@ -23,9 +23,9 @@ A local-first Chrome Manifest V3 extension for Google Meet recording and speaker
 - Explicit Light, Dark and System themes.
 
 ## Important speech-recognition limitation
-The extension records and enhances the microphone audio that is included in the saved video. Google Meet generates its live captions using its own selected microphone and speech-recognition service. The extension cannot inject its processed audio into Meet's internal caption engine or replace that model. For the best live-caption accuracy, choose the correct microphone and spoken language in Meet settings, use a close microphone, avoid clipping, and enable Meet captions in the correct language. Very fast speech, overlapping speakers, low-quality microphones and background noise can still cause recognition errors.
+The extension records and enhances the microphone audio that is included in the saved video. Google Meet generates its speaker-attributed captions using its own microphone and speech-recognition service. The extension cannot inject its processed audio into Meet's internal caption engine. An optional Chrome on-device dictation path separately transcribes the user's own voice and labels it “You (on-device)”; it requires a supported Chrome build and a locally installed language pack. Chrome's on-device speech-recognition APIs are still marked experimental and language availability varies. For best results, choose the correct microphone and spoken language in Meet settings, use a close microphone, avoid clipping, and enable Meet captions in the correct language. Very fast speech, overlapping speakers, low-quality microphones and background noise can still cause recognition errors.
 
-Mic sensitivity, automatic gain and voice enhancement apply to the saved microphone track. Excessive gain can also raise room noise, so use the setup meter and select the lowest gain that captures normal speech clearly.
+Mic sensitivity, automatic gain and voice enhancement apply to the saved microphone track. The on-device speech recognizer listens through the browser's default microphone, so set that to the same physical microphone used in Meet. Excessive gain can also raise room noise, so use the setup meter and select the lowest gain that captures normal speech clearly.
 
 ## Verification and known limitations
 Run `node --check background.js`, `node --check content.js`, `node --check offscreen.js`, `node --check sidepanel.js`, `node --check setup.js`, and `node --test`.
