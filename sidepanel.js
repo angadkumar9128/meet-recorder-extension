@@ -1,5 +1,5 @@
 const $=id=>document.getElementById(id);
-let state={recording:false,paused:false,elapsedMs:0},sessionId=null,entries=[],timer=null,scrollLatest=true,playerUrl=null,localRecognizer=null,localAsrEnabled=false,localAsrLang='en-US',localAsrRestart=null;
+let state={recording:false,paused:false,elapsedMs:0},sessionId=null,entries=[],timer=null,scrollLatest=true,playerUrl=null,localRecognizer=null,localAsrEnabled=false,localAsrLang='en-US',localAsrRestart=null,localAsrStream=null,localAsrContext=null,localAsrTrack=null,localAsrLevelTimer=null;
 const fmt=ms=>{const n=Math.floor(ms/1000),p=x=>String(x).padStart(2,'0');return p(Math.floor(n/3600))+':'+p(Math.floor(n%3600/60))+':'+p(n%60);};
 const elapsed=()=>Math.max(0,(state.elapsedMs||0)+(state.recording&&!state.paused&&state.segmentStartedAt?Date.now()-state.segmentStartedAt:0));
 async function request(type,extra={}){const r=await chrome.runtime.sendMessage({type,...extra});if(r&&r.ok===false)throw new Error(r.error||'Request failed');return r;}
@@ -24,9 +24,34 @@ async function refresh(){
   clearInterval(timer);timer=setInterval(renderState,250);
 }
 function stopLocalAsr(reset=false){
-  clearTimeout(localAsrRestart);localAsrRestart=null;
+  clearTimeout(localAsrRestart);localAsrRestart=null;clearInterval(localAsrLevelTimer);localAsrLevelTimer=null;
   if(localRecognizer){const r=localRecognizer;localRecognizer=null;r.onend=null;r.onerror=null;try{r.stop();}catch{}}
+  localAsrTrack?.stop();localAsrTrack=null;localAsrStream?.getTracks().forEach(t=>t.stop());localAsrStream=null;
+  if(localAsrContext){localAsrContext.close().catch(()=>{});localAsrContext=null;}
   if(reset)localAsrEnabled=false;
+}
+function launchLocalRecognizer(SR,lang){
+  if(!localAsrEnabled||!state.recording||state.paused||!localAsrTrack)return;
+  const recognition=new SR();recognition.lang=lang;recognition.continuous=true;recognition.interimResults=false;recognition.processLocally=true;
+  recognition.onresult=event=>{
+    for(let i=event.resultIndex;i<event.results.length;i++){
+      const result=event.results[i];if(!result.isFinal)continue;
+      const text=String(result[0]?.transcript||'').trim();if(!text)continue;
+      const entry={speaker:'You (on-device)',text,t:Math.floor(elapsed()/1000),committed:true,source:'local-asr'};
+      request('LOCAL_TRANSCRIPT_UPDATE',{sessionId,entry}).then(async()=>{const latest=await request('GET_TRANSCRIPT',{sessionId});entries=latest.entries||[];render();}).catch(e=>$('status').textContent='Local transcript could not be saved: '+e.message);
+    }
+  };
+  recognition.onerror=event=>{
+    if(['not-allowed','service-not-allowed','language-not-supported','audio-capture'].includes(event.error)){
+      localAsrEnabled=false;$('status').textContent='On-device transcription stopped: '+event.error+'. Meet captions and recording can continue.';
+    }
+  };
+  recognition.onend=()=>{
+    if(localRecognizer===recognition)localRecognizer=null;
+    if(localAsrEnabled&&state.recording&&!state.paused)localAsrRestart=setTimeout(()=>launchLocalRecognizer(SR,lang),600);
+  };
+  localRecognizer=recognition;
+  try{recognition.start(localAsrTrack);}catch(e){try{recognition.start();}catch(second){localAsrEnabled=false;$('status').textContent='Could not start on-device recognition: '+second.message;}}
 }
 async function startLocalAsr(lang){
   if(!state.recording||state.paused)return false;
@@ -34,38 +59,24 @@ async function startLocalAsr(lang){
   if(!SR||typeof SR.available!=='function'||typeof SR.install!=='function'){
     localAsrEnabled=false;$('status').textContent='On-device speech recognition is not available in this Chrome build. Meet captions will continue normally.';return false;
   }
-  localAsrLang=lang||'en-US';localAsrEnabled=true;
+  stopLocalAsr(false);localAsrLang=lang||'en-US';localAsrEnabled=true;
   try{
     const options={langs:[localAsrLang],processLocally:true,quality:'dictation'};
     const availability=await SR.available(options);
-    if(availability!=='available'){
-      if(availability==='downloadable'||availability==='downloading'){
-        $('status').textContent='Preparing Chrome’s on-device '+localAsrLang+' speech model…';
-        const installed=await SR.install(options);
-        if(!installed)throw new Error('Chrome could not install the local language pack.');
-      }else throw new Error('Chrome does not provide an on-device dictation model for '+localAsrLang+'.');
-    }
-    if(!localAsrEnabled||!state.recording||state.paused)return false;
-    const recognition=new SR();recognition.lang=localAsrLang;recognition.continuous=true;recognition.interimResults=false;recognition.processLocally=true;
-    recognition.onresult=event=>{
-      for(let i=event.resultIndex;i<event.results.length;i++){
-        const result=event.results[i];if(!result.isFinal)continue;
-        const text=String(result[0]?.transcript||'').trim();if(!text)continue;
-        const entry={speaker:'You (on-device)',text,t:Math.floor(elapsed()/1000),committed:true,source:'local-asr'};
-        request('LOCAL_TRANSCRIPT_UPDATE',{sessionId,entry}).then(async()=>{const latest=await request('GET_TRANSCRIPT',{sessionId});entries=latest.entries||[];render();}).catch(e=>$('status').textContent='Local transcript could not be saved: '+e.message);
-      }
-    };
-    recognition.onerror=event=>{
-      if(['not-allowed','service-not-allowed','language-not-supported','audio-capture'].includes(event.error)){
-        localAsrEnabled=false;$('status').textContent='On-device transcription stopped: '+event.error+'. Meet captions and recording can continue.';
-      }
-    };
-    recognition.onend=()=>{
-      if(localRecognizer===recognition)localRecognizer=null;
-      if(localAsrEnabled&&state.recording&&!state.paused)localAsrRestart=setTimeout(()=>startLocalAsr(localAsrLang),500);
-    };
-    localRecognizer=recognition;recognition.start();$('status').textContent='Recording with Meet captions and optional on-device mic transcription.';return true;
-  }catch(e){localAsrEnabled=false;$('status').textContent='On-device transcription unavailable: '+e.message+' Meet captions are still active.';return false;}
+    if(availability!=='available')throw new Error('Install the '+localAsrLang+' local speech pack from Settings before recording.');
+    const cfg=await chrome.storage.local.get(['micDeviceId','micGain','autoGain','enhanceMic']);
+    const audio={echoCancellation:true,noiseSuppression:cfg.enhanceMic!==false,autoGainControl:true,channelCount:1};
+    localAsrStream=await navigator.mediaDevices.getUserMedia({audio:{...audio,...(cfg.micDeviceId?{deviceId:{exact:cfg.micDeviceId}}:{})}});
+    localAsrContext=new AudioContext({sampleRate:48000});await localAsrContext.resume();
+    const source=localAsrContext.createMediaStreamSource(localAsrStream),highpass=localAsrContext.createBiquadFilter(),compressor=localAsrContext.createDynamicsCompressor(),gain=localAsrContext.createGain(),analyser=localAsrContext.createAnalyser(),destination=localAsrContext.createMediaStreamDestination();
+    highpass.type='highpass';highpass.frequency.value=85;highpass.Q.value=.7;compressor.threshold.value=-28;compressor.knee.value=18;compressor.ratio.value=3.5;compressor.attack.value=.006;compressor.release.value=.24;
+    const base=Number(cfg.micGain)||2;gain.gain.value=base;analyser.fftSize=512;const data=new Float32Array(analyser.fftSize);
+    source.connect(highpass);highpass.connect(compressor);compressor.connect(gain);gain.connect(destination);source.connect(analyser);
+    localAsrTrack=destination.stream.getAudioTracks()[0];
+    localAsrLevelTimer=setInterval(()=>{if(!localAsrContext||localAsrContext.state==='closed')return;analyser.getFloatTimeDomainData(data);let sum=0;for(let i=0;i<data.length;i++)sum+=data[i]*data[i];const level=Math.sqrt(sum/data.length);if(cfg.autoGain!==false&&level>.00025){const target=Math.max(1,Math.min(3.2,.085/level));gain.gain.setTargetAtTime(Math.max(.5,Math.min(5,base*target)),localAsrContext.currentTime,.2);}},120);
+    if(!localAsrEnabled||!state.recording||state.paused){stopLocalAsr(false);return false;}
+    launchLocalRecognizer(SR,localAsrLang);$('status').textContent='Using Chrome on-device dictation with enhanced microphone audio.';return true;
+  }catch(e){stopLocalAsr(true);$('status').textContent='On-device transcription unavailable: '+e.message+' Meet captions are still active.';return false;}
 }
 function openDb(){return new Promise((resolve,reject)=>{const r=indexedDB.open('meet-notebook-media',2);r.onupgradeneeded=()=>{const db=r.result;if(!db.objectStoreNames.contains('chunks'))db.createObjectStore('chunks',{keyPath:['sessionId','index']});if(!db.objectStoreNames.contains('videos'))db.createObjectStore('videos',{keyPath:'sessionId'});};r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});}
 async function readVideo(id){const db=await openDb();return new Promise((resolve,reject)=>{const tx=db.transaction('videos','readonly');const r=tx.objectStore('videos').get(id);r.onsuccess=()=>resolve(r.result?.blob||null);r.onerror=()=>reject(r.error);tx.oncomplete=()=>db.close();});}
@@ -116,7 +127,7 @@ $('installSpeechPack').onclick=async()=>{
 $('micSetup').onclick=()=>chrome.tabs.create({url:chrome.runtime.getURL('setup.html')});
 $('save').onclick=async()=>{
   const s={myName:$('myName').value.trim(),quality:$('quality').value,theme:$('theme').value,micGain:Number($('micGain').value),autoGain:$('autoGain').checked,enhanceMic:$('enhanceMic').checked,localTranscription:$('localTranscription').checked,captionLanguage:$('captionLanguage').value};
-  await chrome.storage.local.set(s);document.body.dataset.theme=s.theme==='system'?'':s.theme;if(state.recording){if(s.localTranscription)await startLocalAsr(s.captionLanguage);else stopLocalAsr(true);}$('status').textContent='Settings saved. Audio changes apply to the next recording.';
+  await chrome.storage.local.set(s);document.body.dataset.theme=s.theme==='system'?'':s.theme;if(state.recording){if(s.localTranscription){stopLocalAsr(false);await startLocalAsr(s.captionLanguage);}else stopLocalAsr(true);}$('status').textContent='Settings saved. Audio changes apply to the next recording.';
 };
 $('diagnostics').onclick=async()=>{try{const tab=await activeMeet();const r=await request('DIAGNOSE',{tabId:tab.id});if(!r.found)throw new Error('Meet captions were not found. Turn on CC.');await navigator.clipboard.writeText(r.html);$('status').textContent='Sanitized diagnostics copied.';}catch(e){$('status').textContent=e.message;}};
 chrome.storage.onChanged.addListener((changes,area)=>{
