@@ -10,7 +10,10 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile, Request
+from dotenv import load_dotenv
+
+load_dotenv(Path(__file__).with_name('.env'))
 from fastapi.middleware.cors import CORSMiddleware
 
 APP_HOST = os.getenv("MEETNOTEBOOK_HOST", "127.0.0.1")
@@ -21,11 +24,26 @@ HF_TOKEN = os.getenv("HF_TOKEN", "").strip()
 app = FastAPI(title="Meet Notebook Local Transcription", version="1.0.0")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Extension origins are generated per browser installation.
+    allow_origins=[],
+    allow_origin_regex=r"^(chrome-extension://[a-p]{32}|http://127\\.0\\.0\\.1(:[0-9]+)?|http://localhost(:[0-9]+)?)$",
     allow_credentials=False,
     allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def restrict_browser_origins(request: Request, call_next):
+    origin = request.headers.get("origin", "")
+    if origin and not (
+        origin.startswith("chrome-extension://")
+        or origin.startswith("http://127.0.0.1")
+        or origin.startswith("http://localhost")
+    ):
+        return __import__("fastapi").responses.JSONResponse(
+            status_code=403, content={"detail": "Only the Meet Notebook extension or loopback clients are allowed."}
+        )
+    return await call_next(request)
 
 
 @app.get("/health")
