@@ -25,7 +25,7 @@ app = FastAPI(title="Meet Notebook Local Transcription", version="1.0.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[],
-    allow_origin_regex=r"^(chrome-extension://[a-p]{32}|http://127\\.0\\.0\\.1(:[0-9]+)?|http://localhost(:[0-9]+)?)$",
+    allow_origin_regex=r"^(chrome-extension://[a-p]{32}|http://127\.0\.0\.1(:[0-9]+)?|http://localhost(:[0-9]+)?)$",
     allow_credentials=False,
     allow_methods=["GET", "POST"],
     allow_headers=["*"],
