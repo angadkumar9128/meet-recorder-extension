@@ -6,6 +6,8 @@ const pad=n=>String(n).padStart(2,'0');
 const stamp=ms=>{const d=new Date(ms);return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate())+'_'+pad(d.getHours())+'-'+pad(d.getMinutes());};
 const codeFrom=url=>{try{return new URL(url).pathname.split('/').filter(Boolean).join('')||'meet';}catch{return 'meet';}};
 function elapsedNow(s){return Math.max(0,(s.elapsedMs||0)+(s.recording&&!s.paused&&s.segmentStartedAt?Date.now()-s.segmentStartedAt:0));}
+function mergeWithAuxiliary(meetEntries,storedEntries){const auxiliary=(storedEntries||[]).filter(e=>e.source==='local-asr'||e.source==='note');const meet=(meetEntries||[]).map(e=>({...e,source:'meet'}));return [...meet,...auxiliary].sort((a,b)=>(a.t||0)-(b.t||0));}
+function normalizeSpeech(s){return String(s||'').toLocaleLowerCase().normalize('NFKC').replace(/[^\\w\\s]/g,'').replace(/\\s+/g,' ').trim();}
 async function ensureOffscreen(){const list=await chrome.runtime.getContexts({contextTypes:['OFFSCREEN_DOCUMENT']});if(!list.length)await chrome.offscreen.createDocument({url:'offscreen.html',reasons:['USER_MEDIA','BLOBS'],justification:'Capture, enhance and locally persist meeting media.'});}
 async function sendTab(tabId,message){try{return await chrome.tabs.sendMessage(tabId,message);}catch{await chrome.scripting.executeScript({target:{tabId},files:['lib/transcript.js','content.js']});return chrome.tabs.sendMessage(tabId,message);}}
 function transcriptText(entries,state,format){const turns=MeetNotebookTranscript.buildTurns(entries,state.myName||'You');if(format==='json')return JSON.stringify({meeting:state.code,startedAt:state.startedAt,turns},null,2);if(format==='md')return '# '+state.code+'\\n\\n'+turns.map(t=>'**'+t.name+'** — '+t.text).join('\\n\\n')+'\\n';return turns.map(t=>t.name+' - '+t.text).join('\\n\\n')+'\\n';}
@@ -16,7 +18,7 @@ async function stopRecording(){
   const elapsedMs=elapsedNow(state);const stopped={...state,recording:false,paused:false,elapsedMs,segmentStartedAt:null,finalizing:true};
   await setState(stopped);await chrome.action.setBadgeText({text:''});
   let entries=[];try{const r=await chrome.tabs.sendMessage(state.tabId,{type:'STOP_TRANSCRIPT'});entries=r.entries||[];}catch{}
-  const saved=await chrome.storage.local.get('transcript:'+state.sessionId);if(!entries.length)entries=saved['transcript:'+state.sessionId]||[];
+  const saved=await chrome.storage.local.get('transcript:'+state.sessionId);entries=entries.length?mergeWithAuxiliary(entries,saved['transcript:'+state.sessionId]||[]):(saved['transcript:'+state.sessionId]||[]);
   await saveSession(stopped,entries,'finalizing');
   await chrome.downloads.download({url:'data:text/plain;charset=utf-8,'+encodeURIComponent(transcriptText(entries,stopped,'txt')),filename:'MeetNotebook/'+state.stamp+'_'+state.code+'_transcript.txt',saveAs:false});
   await chrome.runtime.sendMessage({target:'offscreen',type:'STOP'}).catch(()=>{});
@@ -54,10 +56,18 @@ chrome.runtime.onMessage.addListener((msg,sender,reply)=>{
       case 'GET_TRANSCRIPT':{const s=await getState();const id=msg.sessionId||s.sessionId;if(!id){reply({entries:[]});break;}const d=await chrome.storage.local.get('transcript:'+id);reply({entries:d['transcript:'+id]||[]});break;}
       case 'TRANSCRIPT_UPDATE':{
         const s=await getState();const id=msg.sessionId||s.sessionId;if(!id)throw new Error('No active meeting session.');
-        const entries=msg.entries||[];await chrome.storage.local.set({['transcript:'+id]:entries});await saveSession({...s,sessionId:id},entries,s.recording?'recording':s.finalizing?'finalizing':'saved');reply({ok:true});break;
+        const old=await chrome.storage.local.get('transcript:'+id);const entries=mergeWithAuxiliary(msg.entries||[],old['transcript:'+id]||[]);await chrome.storage.local.set({['transcript:'+id]:entries});await saveSession({...s,sessionId:id},entries,s.recording?'recording':s.finalizing?'finalizing':'saved');reply({ok:true});break;
       }
       case 'ROSTER_UPDATE':{const d=await chrome.storage.local.get('sessions');const rows=d.sessions||[];const i=rows.findIndex(x=>x.id===msg.sessionId);if(i>=0){rows[i]={...rows[i],participants:msg.participants||[]};await chrome.storage.local.set({sessions:rows});}reply({ok:true});break;}
       case 'AUDIO_LEVELS':await chrome.storage.local.set({micAudioLevel:msg.mic||0,tabAudioLevel:msg.tab||0});reply({ok:true});break;
+      case 'LOCAL_TRANSCRIPT_UPDATE':
+      case 'NOTE_UPDATE':{
+        const s=await getState();const id=msg.sessionId||s.sessionId;if(!id)throw new Error('No active meeting session.');
+        const key='transcript:'+id;const d=await chrome.storage.local.get(key);const entries=d[key]||[];const entry={...(msg.entry||{}),source:msg.type==='NOTE_UPDATE'?'note':'local-asr'};
+        const normalized=normalizeSpeech(entry.text);const duplicate=entries.some(e=>Math.abs((e.t||0)-(entry.t||0))<=4&&normalizeSpeech(e.text)===normalized);
+        if(normalized&&!duplicate)entries.push(entry);
+        entries.sort((a,b)=>(a.t||0)-(b.t||0));await chrome.storage.local.set({[key]:entries});await saveSession({...s,sessionId:id},entries,s.recording?'recording':s.finalizing?'finalizing':'saved');reply({ok:true,duplicate});break;
+      }
       case 'LIST_SESSIONS':{const d=await chrome.storage.local.get('sessions');reply({sessions:d.sessions||[]});break;}
       case 'DOWNLOAD_TRANSCRIPT':await downloadTranscript(msg.sessionId,msg.format||'txt');reply({ok:true});break;
       case 'DELETE_SESSION':{const d=await chrome.storage.local.get('sessions');await chrome.storage.local.set({sessions:(d.sessions||[]).filter(x=>x.id!==msg.sessionId)});await chrome.storage.local.remove('transcript:'+msg.sessionId);await deleteChunks(msg.sessionId);reply({ok:true});break;}
