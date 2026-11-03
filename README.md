@@ -11,10 +11,11 @@ A local-first Chrome Manifest V3 extension for Google Meet recording and speaker
 6. Tell every participant before recording and comply with your organization's recording rules and local law.
 
 ## Current functionality
-- Chrome Side Panel with live transcript, pause-aware timer, start/pause/resume/stop controls and past meetings.
+- Chrome Side Panel on the right with live transcript, pause-aware timer, start/pause/resume/stop controls and past meetings. The Meet caption overlay can be hidden while its text continues to feed the Side Panel.
 - Meet captions observed through MutationObserver, with reattachment when Meet rebuilds the caption region and faster caption update handling.
 - Word-overlap stitching, speaker turn merging and transcript timestamps that exclude paused time.
-- Local tab-audio capture plus optional microphone capture, device selection, live input meters, adjustable mic sensitivity, automatic gain and voice filtering/compression.\n- Optional Chrome on-device dictation for the user's own voice (language-pack availability varies); results are labelled separately from Meet's speaker-attributed captions.
+- Local tab-audio capture plus optional microphone capture, device selection, live input meters, adjustable mic sensitivity, automatic gain and voice filtering/compression.
+- Optional Chrome on-device dictation for the user's own voice (language-pack availability varies); results are labelled separately from Meet's speaker-attributed captions.
 - 48 kHz Web Audio mixing with a final dynamics limiter.
 - MP4 H.264/AAC when supported, otherwise VP8/Opus WebM.
 - WebM duration metadata and cue-point generation on finalization to improve the native seek timeline.
