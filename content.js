@@ -1,7 +1,7 @@
 (() => {
   if(window.__meetNotebookLoaded)return;window.__meetNotebookLoaded=true;
   const SELECTORS={regions:['[role="region"][aria-label*="caption" i]','[aria-label="Captions"]','[aria-label*="caption" i][role="group"]','[aria-live]'],buttons:['button[aria-label*="turn on captions" i]','button[aria-label*="turn off captions" i]'],tiles:['[data-participant-id]','[data-self-name]','[role="listitem"][aria-label]']};
-  let entries=[],active=null,observer=null,observedRegion=null,rootObserver=null,persistTimer=null,reattachTimer=null,stableTimer=null,publishTimer=null,sessionId=null,elapsedBeforePause=0,activeSegmentStart=0,paused=false,hideNativeCaptions=true;
+  let entries=[],active=null,observer=null,observedRegion=null,rootObserver=null,persistTimer=null,reattachTimer=null,stableTimer=null,publishTimer=null,rosterTimer=null,sessionId=null,elapsedBeforePause=0,activeSegmentStart=0,paused=false,hideNativeCaptions=true,lastSpeaker=null,lastTextByNode=new WeakMap(),seenCaptionFingerprints=new Map();
   const originalCaptionStyles=new WeakMap();
   const elapsed=()=>Math.max(0,Math.floor((elapsedBeforePause+(activeSegmentStart?performance.now()-activeSegmentStart:0))/1000));
   const region=()=>{for(const sel of SELECTORS.regions){const el=document.querySelector(sel);if(el&&((el.getAttribute('aria-label')||'').toLowerCase().includes('caption')||el.querySelector('img,[role="img"]')))return el;}return null;};
@@ -17,18 +17,40 @@
   const lines=el=>(el.innerText||'').split('\n').map(x=>x.trim()).filter(x=>x&&!junk.test(x)&&!/^[a-z]+(_[a-z]+)+$/i.test(x));
   function blocks(r){const out=new Set();r.querySelectorAll('img,[role="img"]').forEach(img=>{let el=img.parentElement;while(el&&el!==r){if(el.querySelectorAll('img,[role="img"]').length>1)break;if(lines(el).length>=2){out.add(el);break;}el=el.parentElement;}});if(!out.size){const root=r.firstElementChild||r;[...root.children].forEach(el=>{if(lines(el).length>=2)out.add(el);});}return [...out];}
   function scan(){
-    if(paused)return;const r=region();if(!r)return;let newest=null;
-    for(const b of blocks(r)){const l=lines(b);if(l.length<2)continue;const speaker=l[0].replace(/\s*\(you\)\s*$/i,'').trim();const text=l.slice(1).join(' ').trim();if(!speaker||!text||speaker.length>80)continue;newest={speaker,text};}
-    if(!newest)return;
-    if(active&&active.speaker===newest.speaker)active.text=MeetNotebookTranscript.mergeRollingText(active.text,newest.text);
-    else{active={speaker:newest.speaker,text:newest.text,t:elapsed(),committed:false};entries.push(active);}
-    active.updatedAt=Date.now();clearTimeout(stableTimer);stableTimer=setTimeout(()=>{if(active)active.committed=true;publish();},650);publish();
+    if(paused)return;
+    const r=region();if(!r)return;
+    // Process every visible caption card in DOM order. A single mutation may
+    // contain updates from several participants, not just the final card.
+    for(const block of blocks(r)){
+      const l=lines(block);if(l.length<2)continue;
+      const speaker=l[0].replace(/\\s*\\(you\\)\\s*$/i,'').trim();
+      const text=l.slice(1).join(' ').replace(/\\s+/g,' ').trim();
+      if(!speaker||!text||speaker.length>80||text.length>2000)continue;
+      const fingerprint=speaker.toLocaleLowerCase()+'|'+text.toLocaleLowerCase().normalize('NFKC').replace(/\\s+/g,' ').trim();
+      if(lastTextByNode.get(block)===fingerprint)continue;
+      lastTextByNode.set(block,fingerprint);
+      const now=Date.now(),previous=seenCaptionFingerprints.get(fingerprint);
+      if(previous&&now-previous<10*60*1000)continue;
+      seenCaptionFingerprints.set(fingerprint,now);
+      while(seenCaptionFingerprints.size>12000)seenCaptionFingerprints.delete(seenCaptionFingerprints.keys().next().value);
+      if(active&&lastSpeaker===speaker){
+        const merged=MeetNotebookTranscript.mergeRollingText(active.text,text);
+        if(merged!==active.text)active.text=merged;
+        active.updatedAt=now;active.committed=false;
+      }else{
+        active={speaker,text,t:elapsed(),committed:false};
+        entries.push(active);lastSpeaker=speaker;
+      }
+      clearTimeout(stableTimer);
+      stableTimer=setTimeout(()=>{if(active)active.committed=true;publish();},700);
+      publish();
+    }
   }
-  function publish(){if(!sessionId)return;clearTimeout(publishTimer);publishTimer=setTimeout(()=>chrome.runtime.sendMessage({type:'TRANSCRIPT_UPDATE',sessionId,entries}).catch(()=>{}),180);}
+  function publish(){if(!sessionId)return;clearTimeout(publishTimer);publishTimer=setTimeout(()=>chrome.runtime.sendMessage({type:'TRANSCRIPT_UPDATE',sessionId,entries}).catch(()=>{}),500);}
   function attach(){const r=region();if(!r)return false;if(hideNativeCaptions)setCaptionVisibility(true);if(observer&&observedRegion===r)return true;observer?.disconnect();observedRegion=r;observer=new MutationObserver(scan);observer.observe(r,{childList:true,characterData:true,subtree:true});scan();return true;}
   function participants(){const out=new Set();SELECTORS.tiles.forEach(sel=>document.querySelectorAll(sel).forEach(el=>{const n=(el.getAttribute('aria-label')||el.getAttribute('data-self-name')||el.innerText||'').split(/[,\n]/)[0].trim();if(n&&n.length<80)out.add(n);}));return [...out];}
-  function cleanup(){observer?.disconnect();rootObserver?.disconnect();clearInterval(persistTimer);clearInterval(reattachTimer);clearTimeout(stableTimer);clearTimeout(publishTimer);observer=null;observedRegion=null;rootObserver=null;}
-  function start(msg){cleanup();entries=[];active=null;elapsedBeforePause=0;activeSegmentStart=performance.now();sessionId=msg.sessionId;paused=false;hideNativeCaptions=msg.hideNativeCaptions!==false;enableCaptions();attach();rootObserver=new MutationObserver(()=>{if(region())attach();else{observer?.disconnect();observer=null;observedRegion=null;}});rootObserver.observe(document.documentElement,{childList:true,subtree:true});reattachTimer=setInterval(()=>{enableCaptions();attach();},1800);persistTimer=setInterval(()=>{publish();chrome.runtime.sendMessage({type:'ROSTER_UPDATE',sessionId,participants:participants()}).catch(()=>{});},2500);}
+  function cleanup(){observer?.disconnect();rootObserver?.disconnect();clearInterval(persistTimer);clearInterval(reattachTimer);clearInterval(rosterTimer);clearTimeout(stableTimer);clearTimeout(publishTimer);observer=null;observedRegion=null;rootObserver=null;}
+  function start(msg){cleanup();entries=[];active=null;lastSpeaker=null;lastTextByNode=new WeakMap();seenCaptionFingerprints.clear();elapsedBeforePause=0;activeSegmentStart=performance.now();sessionId=msg.sessionId;paused=false;hideNativeCaptions=msg.hideNativeCaptions!==false;enableCaptions();attach();rootObserver=new MutationObserver(()=>{if(region())attach();else{observer?.disconnect();observer=null;observedRegion=null;}});rootObserver.observe(document.documentElement,{childList:true,subtree:true});reattachTimer=setInterval(()=>{enableCaptions();attach();},1800);persistTimer=setInterval(publish,3000);rosterTimer=setInterval(()=>chrome.runtime.sendMessage({type:'ROSTER_UPDATE',sessionId,participants:participants()}).catch(()=>{}),10000);}
   function pause(){if(paused)return;elapsedBeforePause+=activeSegmentStart?performance.now()-activeSegmentStart:0;activeSegmentStart=0;paused=true;publish();}
   function resume(){if(!paused)return;paused=false;activeSegmentStart=performance.now();scan();}
   function stop(){if(!paused){elapsedBeforePause+=activeSegmentStart?performance.now()-activeSegmentStart:0;activeSegmentStart=0;paused=true;}clearTimeout(stableTimer);if(active)active.committed=true;setCaptionVisibility(false);cleanup();publish();return entries;}
