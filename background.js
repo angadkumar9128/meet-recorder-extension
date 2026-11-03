@@ -35,7 +35,7 @@ chrome.runtime.onMessage.addListener((msg,sender,reply)=>{
         await ensureOffscreen();const sessionId=crypto.randomUUID();const startedAt=Date.now();
         const capture=await chrome.runtime.sendMessage({target:'offscreen',type:'START',streamId:msg.streamId,sessionId,quality:msg.quality||'high',micGain:msg.micGain||2,autoGain:msg.autoGain!==false,enhanceMic:msg.enhanceMic!==false,micDeviceId:msg.micDeviceId||null});
         if(!capture||!capture.ok)throw new Error(capture&&capture.error||'Could not start recording.');
-        let transcriptOk=true;try{await sendTab(tab.id,{type:'START_TRANSCRIPT',startedAt,sessionId});}catch{transcriptOk=false;}
+        let transcriptOk=true;try{await sendTab(tab.id,{type:'START_TRANSCRIPT',startedAt,sessionId,hideNativeCaptions:msg.hideMeetCaptions!==false});}catch{transcriptOk=false;}
         const state={recording:true,paused:false,tabId:tab.id,sessionId,startedAt,segmentStartedAt:Date.now(),elapsedMs:0,myName:msg.myName||'You',code:codeFrom(tab.url),stamp:stamp(startedAt),quality:msg.quality||'high'};
         await setState(state);await chrome.storage.local.set({activeSessionId:sessionId,['transcript:'+sessionId]:[],pendingRecoverable:true});
         await chrome.action.setBadgeBackgroundColor({color:'#d93025'});await chrome.action.setBadgeText({text:'REC'});
