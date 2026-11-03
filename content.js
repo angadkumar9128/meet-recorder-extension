@@ -2,7 +2,7 @@
   if(window.__meetNotebookLoaded)return;window.__meetNotebookLoaded=true;
   // Keep Meet-specific selectors in one place so DOM changes are easy to maintain.
   const SELECTORS={regions:['[role="region"][aria-label*="caption" i]','[aria-label="Captions"]','[aria-label*="caption" i][role="group"]','[aria-live]'],buttons:['button[aria-label*="turn on captions" i]','button[aria-label*="turn off captions" i]'],tiles:['[data-participant-id]','[data-self-name]','[role="listitem"][aria-label]']};
-  let entries=[],active=null,observer=null,rootObserver=null,persistTimer=null,reattachTimer=null,stableTimer=null,sessionId=null,startedAt=0,paused=false;
+  let entries=[],active=null,observer=null,observedRegion=null,rootObserver=null,persistTimer=null,reattachTimer=null,stableTimer=null,sessionId=null,startedAt=0,paused=false;
   const elapsed=()=>Math.max(0,Math.floor((Date.now()-startedAt)/1000));
   const region=()=>{for(const sel of SELECTORS.regions){const el=document.querySelector(sel);if(el&&((el.getAttribute('aria-label')||'').toLowerCase().includes('caption')||el.querySelector('img,[role="img"]')))return el;}return null;};
   function enableCaptions(){const bs=SELECTORS.buttons.flatMap(s=>[...document.querySelectorAll(s)]);if(bs.some(b=>/turn off captions/i.test(b.getAttribute('aria-label')||'')))return true;const b=bs.find(x=>/turn on captions/i.test(x.getAttribute('aria-label')||''));if(b){b.click();return true;}return false;}
@@ -16,9 +16,9 @@
     active.updatedAt=Date.now();clearTimeout(stableTimer);stableTimer=setTimeout(()=>{if(active)active.committed=true;publish();},1500);publish();
   }
   function publish(){if(!sessionId)return;chrome.runtime.sendMessage({type:'TRANSCRIPT_UPDATE',sessionId,entries}).catch(()=>{});}
-  function attach(){const r=region();if(!r)return false;observer?.disconnect();observer=new MutationObserver(scan);observer.observe(r,{childList:true,characterData:true,subtree:true});scan();return true;}
+  function attach(){const r=region();if(!r)return false;if(observer&&observedRegion===r)return true;observer?.disconnect();observedRegion=r;observer=new MutationObserver(scan);observer.observe(r,{childList:true,characterData:true,subtree:true});scan();return true;}
   function participants(){const out=new Set();SELECTORS.tiles.forEach(sel=>document.querySelectorAll(sel).forEach(el=>{const n=(el.getAttribute('aria-label')||el.getAttribute('data-self-name')||el.innerText||'').split(/[,\n]/)[0].trim();if(n&&n.length<80)out.add(n);}));return [...out];}
-  function cleanup(){observer?.disconnect();rootObserver?.disconnect();clearInterval(persistTimer);clearInterval(reattachTimer);clearTimeout(stableTimer);observer=null;rootObserver=null;}
+  function cleanup(){observer?.disconnect();rootObserver?.disconnect();clearInterval(persistTimer);clearInterval(reattachTimer);clearTimeout(stableTimer);observer=null;observedRegion=null;rootObserver=null;}
   function start(msg){cleanup();entries=[];active=null;startedAt=msg.startedAt||Date.now();sessionId=msg.sessionId;paused=false;enableCaptions();attach();rootObserver=new MutationObserver(()=>{if(region())attach();else observer?.disconnect();});rootObserver.observe(document.documentElement,{childList:true,subtree:true});reattachTimer=setInterval(()=>{enableCaptions();attach();},3000);persistTimer=setInterval(()=>{publish();chrome.runtime.sendMessage({type:'ROSTER_UPDATE',sessionId,participants:participants()}).catch(()=>{});},2500);}
   function stop(){scan();cleanup();publish();return entries;}
   function diagnose(){const r=region();if(!r)return {found:false,html:''};const c=r.cloneNode(true);c.querySelectorAll('*').forEach(el=>{[...el.attributes].forEach(a=>{if(!['class','role','aria-label','aria-live'].includes(a.name))el.removeAttribute(a.name);});if(el.tagName==='IMG')el.setAttribute('src','redacted');});const w=document.createTreeWalker(c,NodeFilter.SHOW_TEXT);while(w.nextNode())w.currentNode.nodeValue='[redacted]';return {found:true,html:c.outerHTML.slice(0,6000)};}
