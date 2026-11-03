@@ -68,18 +68,6 @@ chrome.runtime.onMessage.addListener((msg,sender,reply)=>{
         if(normalized&&!duplicate)entries.push(entry);
         entries.sort((a,b)=>(a.t||0)-(b.t||0));await chrome.storage.local.set({[key]:entries});await saveSession({...s,sessionId:id},entries,s.recording?'recording':s.finalizing?'finalizing':'saved');reply({ok:true,duplicate});break;
       }
-      case 'IMPORT_TRANSCRIPT':{
-        const d=await chrome.storage.local.get('sessions');const rows=d.sessions||[];const session=rows.find(x=>x.id===msg.sessionId);
-        if(!session)throw new Error('Saved meeting not found.');
-        const imported=(msg.entries||[]).filter(e=>String(e.text||'').trim()).map(e=>({...e,source:'whisperx',committed:true}));
-        if(!imported.length)throw new Error('The transcription service returned no speech segments.');
-        const originalMeetEntries=session.originalMeetEntries||(session.entries||[]).filter(e=>e.source==='meet');
-        const preserved=(session.entries||[]).filter(e=>!['meet','whisperx'].includes(e.source));
-        const merged=[...preserved,...imported].sort((a,b)=>(a.t||0)-(b.t||0));
-        await chrome.storage.local.set({['transcript:'+session.id]:merged});
-        await saveSession({...session,sessionId:session.id,recording:false,paused:false,elapsedMs:session.durationMs||0},merged,'saved',{originalMeetEntries,transcriptionEngine:'WhisperX',transcriptionLanguage:msg.language||'unknown',diarization:msg.diarization||'unknown'});
-        reply({ok:true,count:imported.length});break;
-      }
       case 'LIST_SESSIONS':{const d=await chrome.storage.local.get('sessions');reply({sessions:d.sessions||[]});break;}
       case 'DOWNLOAD_TRANSCRIPT':await downloadTranscript(msg.sessionId,msg.format||'txt');reply({ok:true});break;
       case 'DELETE_SESSION':{const d=await chrome.storage.local.get('sessions');await chrome.storage.local.set({sessions:(d.sessions||[]).filter(x=>x.id!==msg.sessionId)});await chrome.storage.local.remove('transcript:'+msg.sessionId);await deleteChunks(msg.sessionId);reply({ok:true});break;}
