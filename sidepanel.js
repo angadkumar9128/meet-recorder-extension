@@ -1,5 +1,5 @@
 const $=id=>document.getElementById(id);
-let state={recording:false,paused:false,elapsedMs:0},sessionId=null,entries=[],timer=null,scrollLatest=true,playerUrl=null,localRecognizer=null,localAsrEnabled=false,localAsrLang='en-US',localAsrRestart=null,localAsrStream=null,localAsrContext=null,localAsrTrack=null,localAsrLevelTimer=null;
+let state={recording:false,paused:false,elapsedMs:0},sessionId=null,entries=[],timer=null,scrollLatest=true,playerUrl=null,localRecognizer=null,localAsrEnabled=false,localAsrLang='en-US',localAsrRestart=null,localAsrStream=null,localAsrContext=null,localAsrTrack=null,localAsrLevelTimer=null,lastStatusSignature='';
 const fmt=ms=>{const n=Math.floor(ms/1000),p=x=>String(x).padStart(2,'0');return p(Math.floor(n/3600))+':'+p(Math.floor(n%3600/60))+':'+p(n%60);};
 const elapsed=()=>Math.max(0,(state.elapsedMs||0)+(state.recording&&!state.paused&&state.segmentStartedAt?Date.now()-state.segmentStartedAt:0));
 async function request(type,extra={}){const r=await chrome.runtime.sendMessage({type,...extra});if(r&&r.ok===false)throw new Error(r.error||'Request failed');return r;}
@@ -9,7 +9,7 @@ function renderState(){
   $('timer').textContent=fmt(elapsed());
   $('meeting').textContent=state.code||'No meeting selected';
   $('start').disabled=!!state.recording;$('pause').disabled=!state.recording;$('pause').textContent=state.paused?'Resume':'Pause';$('stop').disabled=!state.recording;
-  $('status').textContent=state.recording?(state.paused?'Recording paused':'Recording in progress'):state.finalizing?'Finalizing video…':'Ready';
+  const signature=state.recording?(state.paused?'Recording paused':'Recording in progress'):state.finalizing?'Finalizing video…':'Ready';if(signature!==lastStatusSignature){$('status').textContent=signature;lastStatusSignature=signature;}
 }
 function render(){
   const root=$('transcript'),q=$('search').value.trim().toLowerCase();root.replaceChildren();
