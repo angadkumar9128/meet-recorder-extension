@@ -1,0 +1,29 @@
+name: Extension checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Validate JavaScript syntax
+        run: |
+          node --check background.js
+          node --check content.js
+          node --check offscreen.js
+          node --check sidepanel.js
+          node --check setup.js
+      - name: Run transcript tests
+        run: node --test
+      - name: Validate extension manifest
+        run: python -c "import json; json.load(open('manifest.json', encoding='utf-8'))"
