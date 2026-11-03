@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Meet Notebook",
-  "version": "1.4.0",
-  "description": "Private Google Meet recording with local WhisperX transcription and speaker-labelled notes.",
+  "version": "1.4.1",
+  "description": "Portable, local-first Google Meet recording and speaker-labelled caption notebook.",
   "minimum_chrome_version": "116",
   "permissions": [
     "tabCapture",
@@ -15,8 +15,7 @@
     "unlimitedStorage"
   ],
   "host_permissions": [
-    "https://meet.google.com/*",
-    "http://127.0.0.1:8765/*"
+    "https://meet.google.com/*"
   ],
   "background": {
     "service_worker": "background.js"
