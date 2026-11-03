@@ -4,7 +4,7 @@ const getState=async()=>((await chrome.storage.session.get('state')).state)||{re
 const setState=state=>chrome.storage.session.set({state});
 const pad=n=>String(n).padStart(2,'0');
 const stamp=ms=>{const d=new Date(ms);return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate())+'_'+pad(d.getHours())+'-'+pad(d.getMinutes());};
-const codeFrom=url=>{try{return new URL(url).pathname.replace(/\\//g,'')||'meet';}catch{return 'meet';}};
+const codeFrom=url=>{try{return new URL(url).pathname.split('/').filter(Boolean).join('')||'meet';}catch{return 'meet';}};
 function elapsedNow(s){return Math.max(0,(s.elapsedMs||0)+(s.recording&&!s.paused&&s.segmentStartedAt?Date.now()-s.segmentStartedAt:0));}
 async function ensureOffscreen(){const list=await chrome.runtime.getContexts({contextTypes:['OFFSCREEN_DOCUMENT']});if(!list.length)await chrome.offscreen.createDocument({url:'offscreen.html',reasons:['USER_MEDIA','BLOBS'],justification:'Capture, enhance and locally persist meeting media.'});}
 async function sendTab(tabId,message){try{return await chrome.tabs.sendMessage(tabId,message);}catch{await chrome.scripting.executeScript({target:{tabId},files:['lib/transcript.js','content.js']});return chrome.tabs.sendMessage(tabId,message);}}
