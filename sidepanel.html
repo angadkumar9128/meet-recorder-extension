@@ -16,8 +16,10 @@
 <label class="range-label">Microphone sensitivity <output id="gainValue">2.0×</output><input id="micGain" type="range" min="0.5" max="5" step="0.1" value="2"></label>
 <label class="check-label"><input id="autoGain" type="checkbox" checked> Automatic gain for quiet speech</label>
 <label class="check-label"><input id="enhanceMic" type="checkbox" checked> Voice enhancement (noise filter + compression)</label>
+<label class="check-label"><input id="localTranscription" type="checkbox"> Add on-device transcription of my voice</label>
+<label>My speech language<select id="captionLanguage"><option value="en-US">English (US)</option><option value="hi-IN">Hindi (India)</option><option value="en-GB">English (UK)</option><option value="es-ES">Spanish</option><option value="fr-FR">French</option></select></label>
 <button id="micSetup">Test microphone / grant access</button>
-<p class="hint">Sensitivity and voice enhancement affect the recorded microphone track. Google Meet generates its own live captions from the microphone device selected in Meet; this extension cannot directly change Meet's speech-recognition model or guarantee recognition of every fast/quiet word. For best captions, select the correct language and microphone in Meet settings.</p>
+<p class="hint">Sensitivity and voice enhancement affect the recorded microphone track. Optional on-device transcription uses Chrome's local speech model and adds a separate “You (on-device)” speaker line; Chrome may need to download a language pack once. Meet captions remain separate. Local recognition availability depends on your Chrome version and installed language pack.</p>
 <p class="privacy">Recordings and transcripts stay in this browser. Tell all participants before recording.</p>
 <button id="save" class="primary">Save settings</button><button id="diagnostics">Copy caption diagnostics</button>
 </main>
