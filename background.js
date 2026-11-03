@@ -22,7 +22,7 @@ async function stopRecording(){
   await chrome.runtime.sendMessage({target:'offscreen',type:'STOP'}).catch(()=>{});
   return {ok:true,elapsedMs};
 }
-async function deleteChunks(sessionId){return new Promise(resolve=>{const req=indexedDB.open('meet-notebook-media',1);req.onupgradeneeded=()=>{if(!req.result.objectStoreNames.contains('chunks'))req.result.createObjectStore('chunks',{keyPath:['sessionId','index']});};req.onerror=()=>resolve();req.onsuccess=()=>{const db=req.result;const tx=db.transaction('chunks','readwrite');const cursor=tx.objectStore('chunks').openCursor();cursor.onsuccess=()=>{const c=cursor.result;if(!c)return;if(c.value.sessionId===sessionId)c.delete();c.continue();};tx.oncomplete=()=>{db.close();resolve();};tx.onerror=()=>{db.close();resolve();};};});}
+async function deleteChunks(sessionId){return new Promise(resolve=>{const req=indexedDB.open('meet-notebook-media',2);req.onupgradeneeded=()=>{const db=req.result;if(!db.objectStoreNames.contains('chunks'))db.createObjectStore('chunks',{keyPath:['sessionId','index']});if(!db.objectStoreNames.contains('videos'))db.createObjectStore('videos',{keyPath:'sessionId'});};req.onerror=()=>resolve();req.onsuccess=()=>{const db=req.result;const tx=db.transaction(['chunks','videos'],'readwrite');const cursor=tx.objectStore('chunks').openCursor();cursor.onsuccess=()=>{const c=cursor.result;if(!c)return;if(c.value.sessionId===sessionId)c.delete();c.continue();};tx.objectStore('videos').delete(sessionId);tx.oncomplete=()=>{db.close();resolve();};tx.onerror=()=>{db.close();resolve();};};});}
 chrome.runtime.onMessage.addListener((msg,sender,reply)=>{
   if(msg.target==='offscreen')return;
   (async()=>{try{
@@ -50,7 +50,7 @@ chrome.runtime.onMessage.addListener((msg,sender,reply)=>{
         const r=await chrome.runtime.sendMessage({target:'offscreen',type:'RESUME'});if(r&&r.ok===false)throw new Error(r.error||'Could not resume media.');
         await chrome.tabs.sendMessage(s.tabId,{type:'RESUME_TRANSCRIPT'}).catch(()=>{});await setState({...s,paused:false,segmentStartedAt:Date.now()});reply({ok:true});break;
       }
-      case 'GET_STATE':{const s=await getState();reply({...s,elapsedMs:elapsedNow(s)});break;}
+      case 'GET_STATE':{reply(await getState());break;}
       case 'GET_TRANSCRIPT':{const s=await getState();const id=msg.sessionId||s.sessionId;if(!id){reply({entries:[]});break;}const d=await chrome.storage.local.get('transcript:'+id);reply({entries:d['transcript:'+id]||[]});break;}
       case 'TRANSCRIPT_UPDATE':{
         const s=await getState();const id=msg.sessionId||s.sessionId;if(!id)throw new Error('No active meeting session.');
