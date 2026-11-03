@@ -102,6 +102,28 @@ document.querySelectorAll('[data-format]').forEach(b=>b.onclick=async()=>{try{aw
 $('copy').onclick=()=>navigator.clipboard.writeText(entries.map(e=>e.speaker+' - '+e.text).join('\n\n'));
 $('video').onclick=()=>{if(sessionId)playback(sessionId);else $('status').textContent='Start and stop a recording before opening playback.';};
 document.querySelectorAll('.tab').forEach(b=>b.onclick=async()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active',x===b));['live','past','settings'].forEach(id=>$(id).hidden=id!==b.dataset.view);if(b.dataset.view==='past')await loadSessions();});
+async function transcribeSavedMeeting(session,button){
+  const original=button.textContent;button.disabled=true;button.textContent='Checking local engine…';
+  try{
+    const health=await fetch('http://127.0.0.1:8765/health');
+    if(!health.ok)throw new Error('Local transcription service is not ready. Start it with transcription-service\\start.ps1.');
+    const status=await health.json();
+    const blob=await readVideo(session.id);if(!blob)throw new Error('The saved recording is missing from this browser profile.');
+    button.textContent='Uploading to this PC…';
+    const form=new FormData();form.append('file',blob,(session.code||'meeting')+(blob.type.includes('mp4')?'.mp4':'.webm'));form.append('language','');
+    const response=await fetch('http://127.0.0.1:8765/transcribe',{method:'POST',body:form});
+    const payload=await response.json();if(!response.ok)throw new Error(payload.detail||'Local transcription failed.');
+    const imported=(payload.segments||[]).map(segment=>({
+      speaker:segment.speaker||'Speaker (unassigned)',text:segment.text,t:segment.start||0,
+      end:segment.end||segment.start||0,words:segment.words||[],committed:true,source:'whisperx'
+    }));
+    const saved=await request('IMPORT_TRANSCRIPT',{sessionId:session.id,entries:imported,language:payload.language,diarization:payload.diarization});
+    button.textContent='Transcribed ('+saved.count+')';
+    $('status').textContent='Local WhisperX transcription complete · '+payload.language+' · diarization: '+payload.diarization+'. '+(payload.alignment_warning?'Word alignment warning: '+payload.alignment_warning:'');
+    await loadSessions();
+  }catch(error){$('status').textContent=error.message||String(error);button.textContent=original;}
+  finally{button.disabled=false;}
+}
 async function loadSessions(){
   const r=await request('LIST_SESSIONS');const root=$('sessions');root.replaceChildren();
   for(const s of (r.sessions||[]).sort((a,b)=>b.startedAt-a.startedAt)){
@@ -109,7 +131,10 @@ async function loadSessions(){
     const meta=document.createElement('small');meta.textContent=new Date(s.startedAt).toLocaleString()+' · '+fmt(s.durationMs||0)+' · '+s.status;
     const dl=document.createElement('button');dl.textContent='Transcript';dl.onclick=()=>request('DOWNLOAD_TRANSCRIPT',{sessionId:s.id,format:'txt'}).catch(e=>$('status').textContent=e.message);
     card.append(title,meta,dl);
-    if(s.videoAvailable){const play=document.createElement('button');play.textContent='Play / seek';play.onclick=()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active',x.dataset.view==='live'));['live','past','settings'].forEach(id=>$(id).hidden=id!=='live');sessionId=s.id;playback(s.id);};card.append(play);}
+    if(s.videoAvailable){
+      const play=document.createElement('button');play.textContent='Play / seek';play.onclick=()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active',x.dataset.view==='live'));['live','past','settings'].forEach(id=>$(id).hidden=id!=='live');sessionId=s.id;playback(s.id);};card.append(play);
+      const asr=document.createElement('button');asr.textContent=s.transcriptionEngine==='WhisperX'?'Re-transcribe locally':'Transcribe locally';asr.onclick=()=>transcribeSavedMeeting(s,asr);card.append(asr);
+    }
     const del=document.createElement('button');del.textContent='Delete';del.onclick=async()=>{await request('DELETE_SESSION',{sessionId:s.id});await loadSessions();};card.append(del);root.append(card);
   }
 }
