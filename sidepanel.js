@@ -63,7 +63,12 @@ async function startLocalAsr(lang){
   try{
     const options={langs:[localAsrLang],processLocally:true,quality:'dictation'};
     const availability=await SR.available(options);
-    if(availability!=='available')throw new Error('Install the '+localAsrLang+' local speech pack from Settings before recording.');
+    if(availability!=='available'){
+      if(availability==='downloadable'||availability==='downloading'){
+        $('status').textContent='Downloading Chrome’s local '+localAsrLang+' speech model…';
+        const installed=await SR.install(options);if(!installed)throw new Error('Language-pack installation failed.');
+      }else throw new Error('Chrome does not offer a local dictation pack for '+localAsrLang+'.');
+    }
     const cfg=await chrome.storage.local.get(['micDeviceId','micGain','autoGain','enhanceMic']);
     const audio={echoCancellation:true,noiseSuppression:cfg.enhanceMic!==false,autoGainControl:true,channelCount:1};
     localAsrStream=await navigator.mediaDevices.getUserMedia({audio:{...audio,...(cfg.micDeviceId?{deviceId:{exact:cfg.micDeviceId}}:{})}});
