@@ -37,7 +37,7 @@ $('start').onclick=async()=>{
 $('pause').onclick=async()=>{try{await request(state.paused?'RESUME':'PAUSE');await refresh();}catch(e){$('status').textContent=e.message;}};
 $('stop').onclick=async()=>{try{await request('STOP');await refresh();$('status').textContent='Finalizing video…';}catch(e){$('status').textContent=e.message;}};
 $('search').oninput=render;$('transcript').onscroll=()=>{scrollLatest=$('transcript').scrollHeight-$('transcript').scrollTop-$('transcript').clientHeight<35;};
-$('addNote').onclick=()=>{const text=$('manualNote').value.trim();if(!text)return;entries.push({speaker:'My note',text,t:Math.floor(elapsed()/1000),committed:true,note:true});$('manualNote').value='';render();};
+$('addNote').onclick=async()=>{const text=$('manualNote').value.trim();if(!text)return;entries.push({speaker:'My note',text,t:Math.floor(elapsed()/1000),committed:true,note:true});$('manualNote').value='';render();try{await request('TRANSCRIPT_UPDATE',{sessionId,entries});}catch(e){$('status').textContent='Note added locally but could not be saved: '+e.message;}};
 document.querySelectorAll('[data-format]').forEach(b=>b.onclick=async()=>{try{await request('DOWNLOAD_TRANSCRIPT',{sessionId,format:b.dataset.format});}catch(e){$('status').textContent=e.message;}});
 $('copy').onclick=()=>navigator.clipboard.writeText(entries.map(e=>e.speaker+' - '+e.text).join('\\n\\n'));
 $('video').onclick=()=>{if(sessionId)playback(sessionId);else $('status').textContent='Start and stop a recording before opening playback.';};
