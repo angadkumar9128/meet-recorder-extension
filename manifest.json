@@ -1,17 +1,48 @@
 {
   "manifest_version": 3,
-  "name": "Meet Recorder + Speaker Transcript",
-  "version": "1.1.0",
-  "description": "Record Google Meet (video + audio) and save a speaker-labelled transcript.",
+  "name": "Meet Notebook",
+  "version": "1.2.0",
+  "description": "Private Google Meet recording and speaker-labelled transcript notebook.",
   "minimum_chrome_version": "116",
-  "permissions": ["tabCapture", "offscreen", "downloads", "activeTab", "storage", "scripting"],
-  "host_permissions": ["https://meet.google.com/*"],
-  "background": { "service_worker": "background.js" },
-  "action": { "default_popup": "popup.html", "default_title": "Meet Recorder" },
+  "permissions": [
+    "tabCapture",
+    "offscreen",
+    "downloads",
+    "activeTab",
+    "storage",
+    "scripting",
+    "sidePanel",
+    "unlimitedStorage"
+  ],
+  "host_permissions": [
+    "https://meet.google.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "Open Meet Notebook"
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
+  "commands": {
+    "open-notebook": {
+      "suggested_key": {
+        "default": "Alt+Shift+N"
+      },
+      "description": "Open Meet Notebook"
+    }
+  },
   "content_scripts": [
     {
-      "matches": ["https://meet.google.com/*"],
-      "js": ["content.js"],
+      "matches": [
+        "https://meet.google.com/*"
+      ],
+      "js": [
+        "lib/transcript.js",
+        "content.js"
+      ],
       "run_at": "document_idle"
     }
   ]

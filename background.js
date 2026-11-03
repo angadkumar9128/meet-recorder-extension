@@ -1,186 +1,94 @@
-// Service worker: coordinates recording (offscreen doc) + transcript (content script)
-
-const INCLUDE_TIMESTAMPS = false; // true -> adds [mm:ss] before each speaker turn
-
-const getState = async () => (await chrome.storage.session.get('state')).state || { recording: false };
-const setState = (state) => chrome.storage.session.set({ state });
-const pad = (n) => String(n).padStart(2, '0');
-
-function stamp(ms) {
-  const d = new Date(ms);
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}_${pad(d.getHours())}-${pad(d.getMinutes())}`;
+importScripts('lib/transcript.js');
+const getState=async()=>((await chrome.storage.session.get('state')).state)||{recording:false,paused:false};
+const setState=state=>chrome.storage.session.set({state});
+const pad=n=>String(n).padStart(2,'0');
+const stamp=ms=>{const d=new Date(ms);return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate())+'_'+pad(d.getHours())+'-'+pad(d.getMinutes());};
+const codeFrom=url=>{try{return new URL(url).pathname.replace(/\//g,'')||'meet';}catch{return 'meet';}};
+async function ensureOffscreen(){const list=await chrome.runtime.getContexts({contextTypes:['OFFSCREEN_DOCUMENT']});if(!list.length)await chrome.offscreen.createDocument({url:'offscreen.html',reasons:['USER_MEDIA','BLOBS'],justification:'Capture and locally persist meeting media chunks.'});}
+async function sendTab(tabId,message){try{return await chrome.tabs.sendMessage(tabId,message);}catch{await chrome.scripting.executeScript({target:{tabId},files:['lib/transcript.js','content.js']});return chrome.tabs.sendMessage(tabId,message);}}
+function transcriptText(entries,state,format){
+  const turns=MeetNotebookTranscript.buildTurns(entries,state.myName||'You');
+  if(format==='json')return JSON.stringify({meeting:state.code,startedAt:state.startedAt,turns},null,2);
+  if(format==='md')return '# '+state.code+'\n\n'+turns.map(t=>'**'+t.name+'** — '+t.text).join('\n\n')+'\n';
+  return turns.map(t=>t.name+' - '+t.text).join('\n\n')+'\n';
 }
-function meetingCode(url) {
-  try { return new URL(url).pathname.replace(/\//g, '') || 'meet'; } catch { return 'meet'; }
+async function downloadTranscript(sessionId,format){
+  const all=await chrome.storage.local.get('sessions');const sessions=all.sessions||[];const s=sessions.find(x=>x.id===sessionId);if(!s)throw new Error('Meeting transcript not found.');
+  const content=transcriptText(s.entries||[],s,format||'txt');const mime=format==='json'?'application/json':format==='md'?'text/markdown':'text/plain';
+  await chrome.downloads.download({url:'data:'+mime+';charset=utf-8,'+encodeURIComponent(content),filename:'MeetNotebook/'+stamp(s.startedAt)+'_'+s.code+'_transcript.'+(format||'txt'),saveAs:false});
 }
-function fmtTime(sec) {
-  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
-  return h ? `${h}:${pad(m)}:${pad(s)}` : `${pad(m)}:${pad(s)}`;
+async function saveSession(state,entries,status){
+  const data=await chrome.storage.local.get('sessions');const sessions=data.sessions||[];const old=sessions.find(x=>x.id===state.sessionId)||{};
+  const record={...old,id:state.sessionId,code:state.code,startedAt:state.startedAt,endedAt:old.endedAt||Date.now(),myName:state.myName,entries,status};
+  await chrome.storage.local.set({sessions:[record,...sessions.filter(x=>x.id!==state.sessionId)]});
 }
-
-async function ensureOffscreen() {
-  const ctxs = await chrome.runtime.getContexts({ contextTypes: ['OFFSCREEN_DOCUMENT'] });
-  if (ctxs.length) return;
-  await chrome.offscreen.createDocument({
-    url: 'offscreen.html',
-    reasons: ['USER_MEDIA'],
-    justification: 'Record the Google Meet tab and microphone'
-  });
+async function stopRecording(){
+  const state=await getState();if(!state.recording)return {ok:true};
+  await setState({...state,recording:false,paused:false,finalizing:true});await chrome.action.setBadgeText({text:''});
+  let entries=[];try{const r=await chrome.tabs.sendMessage(state.tabId,{type:'STOP_TRANSCRIPT'});entries=r.entries||[];}catch{}
+  const saved=await chrome.storage.local.get('transcript:'+state.sessionId);if(!entries.length)entries=saved['transcript:'+state.sessionId]||[];
+  await saveSession(state,entries,'finalizing');
+  await chrome.downloads.download({url:'data:text/plain;charset=utf-8,'+encodeURIComponent(transcriptText(entries,state,'txt')),filename:'MeetNotebook/'+state.stamp+'_'+state.code+'_transcript.txt',saveAs:false});
+  await chrome.runtime.sendMessage({target:'offscreen',type:'STOP'}).catch(()=>{});
+  return {ok:true};
 }
-
-async function sendToTabWithInject(tabId, msg) {
-  try {
-    return await chrome.tabs.sendMessage(tabId, msg);
-  } catch {
-    // Tab was opened before the extension was loaded -> inject the script now
-    await chrome.scripting.executeScript({ target: { tabId }, files: ['content.js'] });
-    return await chrome.tabs.sendMessage(tabId, msg);
-  }
-}
-
-async function startRecording({ tabId, streamId, myName }) {
-  const st = await getState();
-  if (st.recording) throw new Error('Already recording');
-
-  const tab = await chrome.tabs.get(tabId);
-  await ensureOffscreen();
-  const r = await chrome.runtime.sendMessage({ target: 'offscreen', type: 'START', streamId });
-  if (!r?.ok) throw new Error(r?.error || 'Could not start recording');
-
-  const startedAt = Date.now();
-  await chrome.storage.local.set({ transcript: [] });
-
-  let transcriptOk = true;
-  try {
-    await sendToTabWithInject(tabId, { type: 'START_TRANSCRIPT', startedAt });
-  } catch { transcriptOk = false; }
-
-  await setState({
-    recording: true, tabId, startedAt, myName: myName || 'You',
-    code: meetingCode(tab.url), stamp: stamp(startedAt)
-  });
-  chrome.action.setBadgeBackgroundColor({ color: '#d93025' });
-  chrome.action.setBadgeText({ text: 'REC' });
-  return { ok: true, micOk: r.micOk, transcriptOk };
-}
-
-function cleanSentence(t) {
-  t = t.replace(/\s+/g, ' ').trim();
-  if (!t) return '';
-  t = t.charAt(0).toUpperCase() + t.slice(1);
-  if (!/[.?!।…]$/.test(t)) t += '.';
-  return t;
-}
-
-// Group consecutive lines of the same speaker into ONE turn (notebook style)
-function buildTurns(entries, me) {
-  const turns = [];
-  for (const e of entries) {
-    let name = (e.speaker || '').trim();
-    if (/^you$/i.test(name)) name = me;
-    const text = (e.text || '').trim();
-    if (!name || !text) continue;
-    const last = turns[turns.length - 1];
-    if (last && last.name.toLowerCase() === name.toLowerCase()) {
-      const prev = last.parts[last.parts.length - 1];
-      if (text.startsWith(prev)) last.parts[last.parts.length - 1] = text; // same sentence, grown
-      else if (!prev.includes(text)) last.parts.push(text);
-    } else {
-      turns.push({ name, parts: [text], t: e.t });
-    }
-  }
-  return turns;
-}
-
-function buildTranscriptText(entries, st) {
-  const me = st.myName || 'You';
-  const header = `Meeting: ${st.code}\nDate: ${new Date(st.startedAt).toLocaleString()}\n\n`;
-  const turns = buildTurns(entries, me);
-  if (!turns.length) {
-    return header + '(No captions were captured. Make sure captions (CC) were on in Meet.)\n';
-  }
-  const speakers = [...new Set(turns.map((t) => t.name))];
-  const top = `Participants: ${speakers.join(', ')}\n${'-'.repeat(40)}\n\n`;
-  const body = turns.map((t) => {
-    const ts = INCLUDE_TIMESTAMPS ? `[${fmtTime(t.t)}] ` : '';
-    return `${ts}${t.name} - ${t.parts.map(cleanSentence).join(' ')}`;
-  }).join('\n\n');
-  return header + top + body + '\n';
-}
-
-async function stopRecording() {
-  const st = await getState();
-  if (!st.recording) return { ok: true };
-  await setState({ ...st, recording: false });
-  chrome.action.setBadgeText({ text: '' });
-
-  // 1) transcript
-  let entries = [];
-  try {
-    const r = await chrome.tabs.sendMessage(st.tabId, { type: 'STOP_TRANSCRIPT' });
-    entries = r?.entries || [];
-  } catch { /* tab closed or script gone */ }
-  if (!entries.length) {
-    entries = (await chrome.storage.local.get('transcript')).transcript || [];
-  }
-  const text = buildTranscriptText(entries, st);
-  await chrome.downloads.download({
-    url: 'data:text/plain;charset=utf-8,' + encodeURIComponent(text),
-    filename: `MeetRecordings/${st.stamp}_${st.code}_transcript.txt`
-  });
-
-  // 2) video (offscreen finalises it, then sends VIDEO_READY)
-  chrome.runtime.sendMessage({ target: 'offscreen', type: 'STOP' }).catch(() => {});
-  return { ok: true };
-}
-
-chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-  if (msg.target === 'offscreen') return; // not for us
-
-  (async () => {
-    try {
-      switch (msg.type) {
-        case 'START':
-          sendResponse(await startRecording(msg)); break;
-        case 'STOP':
-          sendResponse(await stopRecording()); break;
-        case 'GET_STATE':
-          sendResponse(await getState()); break;
-        case 'TRANSCRIPT_UPDATE':
-          await chrome.storage.local.set({ transcript: msg.entries });
-          sendResponse({ ok: true }); break;
-        case 'VIDEO_READY': {
-          let st = await getState();
-          if (st.recording) { await stopRecording(); st = await getState(); } // recorder ended by itself
-          const id = await chrome.downloads.download({
-            url: msg.url,
-            filename: `MeetRecordings/${st.stamp || 'meeting'}_${st.code || 'meet'}_video.webm`
-          });
-          await chrome.storage.session.set({ pendingDownloadId: id });
-          sendResponse({ ok: true }); break;
-        }
-        default:
-          sendResponse({ ok: false });
+chrome.runtime.onMessage.addListener((msg,sender,reply)=>{
+  if(msg.target==='offscreen')return;
+  (async()=>{try{
+    switch(msg.type){
+      case 'START':{
+        const old=await getState();if(old.recording)throw new Error('A recording is already active.');
+        const tab=await chrome.tabs.get(msg.tabId);if(!tab.url||!tab.url.startsWith('https://meet.google.com/'))throw new Error('Open a Google Meet tab first.');
+        await ensureOffscreen();const sessionId=crypto.randomUUID();const startedAt=Date.now();
+        const capture=await chrome.runtime.sendMessage({target:'offscreen',type:'START',streamId:msg.streamId,sessionId,quality:msg.quality||'high'});
+        if(!capture||!capture.ok)throw new Error(capture&&capture.error||'Could not start recording.');
+        let transcriptOk=true;try{await sendTab(tab.id,{type:'START_TRANSCRIPT',startedAt,sessionId});}catch{transcriptOk=false;}
+        const state={recording:true,paused:false,tabId:tab.id,sessionId,startedAt,myName:msg.myName||'You',code:codeFrom(tab.url),stamp:stamp(startedAt),quality:msg.quality||'high'};
+        await setState(state);await chrome.storage.local.set({activeSessionId:sessionId,['transcript:'+sessionId]:[],pendingRecoverable:true});
+        await chrome.action.setBadgeBackgroundColor({color:'#d93025'});await chrome.action.setBadgeText({text:'REC'});
+        reply({ok:true,micOk:capture.micOk,transcriptOk,sessionId});break;
       }
-    } catch (e) {
-      sendResponse({ ok: false, error: e.message });
+      case 'STOP':reply(await stopRecording());break;
+      case 'PAUSE':{
+        const s=await getState();if(!s.recording||s.paused)throw new Error('Recording is not running.');
+        await chrome.runtime.sendMessage({target:'offscreen',type:'PAUSE'});await chrome.tabs.sendMessage(s.tabId,{type:'PAUSE_TRANSCRIPT'}).catch(()=>{});await setState({...s,paused:true});reply({ok:true});break;
+      }
+      case 'RESUME':{
+        const s=await getState();if(!s.recording||!s.paused)throw new Error('Recording is not paused.');
+        await chrome.runtime.sendMessage({target:'offscreen',type:'RESUME'});await chrome.tabs.sendMessage(s.tabId,{type:'RESUME_TRANSCRIPT'}).catch(()=>{});await setState({...s,paused:false});reply({ok:true});break;
+      }
+      case 'GET_STATE':reply(await getState());break;
+      case 'GET_TRANSCRIPT':{
+        const s=await getState();const id=msg.sessionId||s.sessionId;if(!id){reply({entries:[]});break;}const d=await chrome.storage.local.get('transcript:'+id);reply({entries:d['transcript:'+id]||[]});break;
+      }
+      case 'TRANSCRIPT_UPDATE':{
+        const s=await getState();const id=msg.sessionId||s.sessionId;if(!id)throw new Error('No active meeting session.');
+        const entries=msg.entries||[];await chrome.storage.local.set({['transcript:'+id]:entries});await saveSession({...s,sessionId:id},entries,s.recording?'recording':'saved');reply({ok:true});break;
+      }
+      case 'ROSTER_UPDATE':{
+        const d=await chrome.storage.local.get('sessions');const rows=d.sessions||[];const i=rows.findIndex(x=>x.id===msg.sessionId);
+        if(i>=0){rows[i]={...rows[i],participants:msg.participants||[]};await chrome.storage.local.set({sessions:rows});}
+        reply({ok:true});break;
+      }
+      case 'LIST_SESSIONS':{const d=await chrome.storage.local.get('sessions');reply({sessions:d.sessions||[]});break;}
+      case 'DOWNLOAD_TRANSCRIPT':await downloadTranscript(msg.sessionId,msg.format||'txt');reply({ok:true});break;
+      case 'DELETE_SESSION':{const d=await chrome.storage.local.get('sessions');await chrome.storage.local.set({sessions:(d.sessions||[]).filter(x=>x.id!==msg.sessionId)});reply({ok:true});break;}
+      case 'VIDEO_READY':{
+        const s=await getState();const d=await chrome.storage.local.get('sessions');const session=(d.sessions||[]).find(x=>x.id===msg.sessionId)||{id:msg.sessionId,code:s.code||'meet',startedAt:s.startedAt||Date.now(),entries:[]};
+        const downloadId=await chrome.downloads.download({url:msg.url,filename:'MeetNotebook/'+stamp(session.startedAt)+'_'+session.code+'_video.'+(String(msg.mimeType||'').includes('mp4')?'mp4':'webm'),saveAs:false});
+        await chrome.storage.local.set({pendingRecoverable:false});
+        const next={...session,status:'saved',endedAt:Date.now()};const sessions=[next,...(d.sessions||[]).filter(x=>x.id!==session.id)];await chrome.storage.local.set({sessions});
+        await chrome.runtime.sendMessage({target:'offscreen',type:'REVOKE_URL',url:msg.url}).catch(()=>{});
+        if(s.sessionId===msg.sessionId)await setState({recording:false,paused:false,sessionId:msg.sessionId,code:session.code});
+        reply({ok:true,downloadId});break;
+      }
+      case 'RECORDING_ERROR':await chrome.storage.local.set({pendingRecoverable:true,lastRecordingError:msg.error||'Recording failed.'});reply({ok:true});break;
+      case 'DIAGNOSE':reply(await chrome.tabs.sendMessage(msg.tabId,{type:'DIAGNOSE'}));break;
+      default:reply({ok:false,error:'Unknown request.'});
     }
-  })();
-  return true; // async response
+  }catch(e){reply({ok:false,error:e.message||String(e)});}})();return true;
 });
-
-// Close the offscreen document once the video file is saved
-chrome.downloads.onChanged.addListener(async (delta) => {
-  const { pendingDownloadId } = await chrome.storage.session.get('pendingDownloadId');
-  if (delta.id !== pendingDownloadId || !delta.state) return;
-  if (delta.state.current === 'complete' || delta.state.current === 'interrupted') {
-    await chrome.storage.session.remove('pendingDownloadId');
-    chrome.offscreen.closeDocument().catch(() => {});
-  }
-});
-
-// If the Meet tab is closed while recording, save everything
-chrome.tabs.onRemoved.addListener(async (tabId) => {
-  const st = await getState();
-  if (st.recording && st.tabId === tabId) stopRecording();
-});
+chrome.action.onClicked.addListener(async tab=>{if(tab.id)await chrome.sidePanel.open({tabId:tab.id});});
+chrome.commands.onCommand.addListener(async command=>{if(command==='open-notebook'){const [tab]=await chrome.tabs.query({active:true,lastFocusedWindow:true});if(tab&&tab.id)await chrome.sidePanel.open({tabId:tab.id});}});
+chrome.tabs.onRemoved.addListener(async tabId=>{const s=await getState();if(s.recording&&s.tabId===tabId)await stopRecording();});
+chrome.runtime.onStartup.addListener(async()=>{const s=await getState();if(s.recording)await chrome.storage.local.set({pendingRecoverable:true});});
