@@ -27,9 +27,9 @@ function float64Bytes(value){const b=new ArrayBuffer(8);new DataView(b).setFloat
 function readUInt(data,start,end){let n=0;for(let i=start;i<end;i++)n=n*256+data[i];return n;}
 function findTrackNumber(data,tracks){if(!tracks)return 1;let p=tracks.dataStart;while(p<tracks.end){const entry=parseElement(data,p,tracks.end);if(!entry)break;if(entry.id===0xAE){let q=entry.dataStart,num=1,type=0;while(q<entry.end){const x=parseElement(data,q,entry.end);if(!x)break;if(x.id===0xD7)num=readUInt(data,x.dataStart,x.end);if(x.id===0x83)type=readUInt(data,x.dataStart,x.end);q=x.end;}if(type===1)return num;}p=entry.end;}return 1;}
 // Add a duration and CuePoints to MediaRecorder WebM output so native players can build a timeline and seek by cluster.
-function repairWebm(input,durationMs){
+async function repairWebm(input,durationMs){
   try{
-    const data=new Uint8Array(input);let p=0,segment=null;
+    const data=new Uint8Array(await input.arrayBuffer());let p=0,segment=null;
     while(p<data.length){const e=parseElement(data,p);if(!e)break;if(e.id===0x18538067){segment=e;break;}p=e.end;}
     if(!segment)return new Blob([input],{type:input.type});
     const children=[];p=segment.dataStart;let timecodeScale=1000000,tracks=null,hasCues=false,info=null;
@@ -82,7 +82,7 @@ async function start(msg){
   recorder=new MediaRecorder(output,{mimeType,videoBitsPerSecond:preset.bitrate,audioBitsPerSecond:192000});
   recorder.ondataavailable=e=>{if(e.data&&e.data.size){const index=chunkIndex++;const task=saveChunk(e.data,index);chunkWrites.push(task);task.catch(err=>console.error('Chunk persistence failed',err));}};
   recorder.onerror=e=>console.error('MediaRecorder error',e.error);
-  recorder.onstop=async()=>{const durationMs=Math.max(0,activeElapsedMs);try{await Promise.all(chunkWrites);const chunks=await readChunks();if(!chunks.length)throw new Error('No media chunks were saved.');let blob=new Blob(chunks.map(x=>x.blob),{type:chunks[0].type||mimeType});if(blob.type.includes('webm'))blob=repairWebm(blob,durationMs);await saveVideo(blob);videoUrl=URL.createObjectURL(blob);const result=await chrome.runtime.sendMessage({type:'VIDEO_READY',sessionId,mimeType:blob.type,url:videoUrl,size:blob.size,durationMs});if(!result||!result.ok)throw new Error(result&&result.error||'Video download failed.');}catch(err){chrome.runtime.sendMessage({type:'RECORDING_ERROR',sessionId,error:err.message}).catch(()=>{});}finally{cleanup();}};
+  recorder.onstop=async()=>{const durationMs=Math.max(0,activeElapsedMs);try{await Promise.all(chunkWrites);const chunks=await readChunks();if(!chunks.length)throw new Error('No media chunks were saved.');let blob=new Blob(chunks.map(x=>x.blob),{type:chunks[0].type||mimeType});if(blob.type.includes('webm'))blob=await repairWebm(blob,durationMs);await saveVideo(blob);videoUrl=URL.createObjectURL(blob);const result=await chrome.runtime.sendMessage({type:'VIDEO_READY',sessionId,mimeType:blob.type,url:videoUrl,size:blob.size,durationMs});if(!result||!result.ok)throw new Error(result&&result.error||'Video download failed.');}catch(err){chrome.runtime.sendMessage({type:'RECORDING_ERROR',sessionId,error:err.message}).catch(()=>{});}finally{cleanup();}};
   recorder.start(1000);segmentStartedAt=performance.now();
   video.addEventListener('ended',()=>{if(recorder&&recorder.state!=='inactive'){if(recorder.state==='recording'&&segmentStartedAt)activeElapsedMs+=performance.now()-segmentStartedAt;segmentStartedAt=0;recorder.stop();}},{once:true});
   return {ok:true,micOk,mimeType,micGain:baseMicGain};
