@@ -23,6 +23,10 @@ A local-first Chrome Manifest V3 extension for Google Meet recording and speaker
 - Transcript export as TXT, Markdown and JSON, copy, searchable live transcript, persistent manual notes, past-meeting playback and sanitized caption diagnostics.
 - Explicit Light, Dark and System themes.
 
+## Optional open-source local transcription (CPU)
+
+The extension includes an optional WhisperX service in `transcription-service/`. On Windows, install Python 3.11 and FFmpeg, then run `transcription-service\\start.ps1` in PowerShell. Keep the service running, reload the extension, open **Past meetings**, and click **Transcribe locally** for a saved recording. It uses WhisperX with Silero VAD and CPU/int8 inference; word alignment is attempted where supported. Speaker diarization is optional and requires a Hugging Face token plus acceptance of the pyannote model terms. See [transcription-service/README.md](transcription-service/README.md) for setup and limitations. The recording is uploaded only to `127.0.0.1` after the explicit button click; no meeting media is sent to a cloud service.
+
 ## Important speech-recognition limitation
 The extension records and enhances the microphone audio that is included in the saved video. Google Meet generates its speaker-attributed captions using its own microphone and speech-recognition service. The extension cannot inject its processed audio into Meet's internal caption engine. An optional Chrome on-device dictation path separately transcribes the user's own voice and labels it “You (on-device)”. It feeds the selected microphone through a local high-pass/compressor/automatic-gain audio graph into the recognizer; it requires a supported Chrome build and a locally installed language pack. Chrome's on-device speech-recognition APIs are still marked experimental and language availability varies. For best results, choose the correct microphone and spoken language in Meet settings, use a close microphone, avoid clipping, and enable Meet captions in the correct language. Very fast speech, overlapping speakers, low-quality microphones and background noise can still cause recognition errors.
 
@@ -36,4 +40,4 @@ Chrome's tab-capture source may reject exact dimensions or frame rate; requested
 No real Google Meet browser session, long-duration recording, multi-device microphone test or VLC/WMP compatibility test has been performed as part of this code update. Verify these in Chrome after reloading the unpacked extension.
 
 ## Privacy
-Recordings, transcripts and microphone data remain in the local browser profile. The extension does not upload them to a server. Participants should be informed before recording.
+Recordings, transcripts and microphone data remain in the local browser profile. The extension does not upload them to a remote server. The optional transcription service runs on loopback and receives a recording only after the user explicitly starts local transcription. Participants should be informed before recording.
