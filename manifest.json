@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Meet Notebook",
-  "version": "1.3.0",
-  "description": "Private Google Meet recording and speaker-labelled transcript notebook.",
+  "version": "1.4.0",
+  "description": "Private Google Meet recording with local WhisperX transcription and speaker-labelled notes.",
   "minimum_chrome_version": "116",
   "permissions": [
     "tabCapture",
