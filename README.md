@@ -1,43 +1,52 @@
 # Meet Notebook
 
-A local-first Chrome Manifest V3 extension for Google Meet recording and speaker-labelled caption notes.
+A portable, local-first Chrome Manifest V3 extension for Google Meet recording and speaker-labelled live caption notes.
 
 ## Install
+
 1. Download or clone this repository.
-2. Visit `chrome://extensions`, enable Developer mode, and click **Load unpacked**.
-3. Select the repository folder.
-4. Open a Google Meet tab and click the extension icon. Use **Alt+Shift+N** to open the side panel.
-5. Open **Settings → Test microphone / grant access** once, choose the microphone you actually use, and speak at a normal volume to verify the level meter.
-6. Tell every participant before recording and comply with your organization's recording rules and local law.
+2. Open `chrome://extensions` and enable Developer mode.
+3. Click **Load unpacked** and select this folder.
+4. Open Google Meet, enable captions in the correct language and start recording.
+5. Tell every participant before recording and comply with local law and organizational rules.
 
-## Current functionality
-- Chrome Side Panel on the right with live transcript, pause-aware timer, start/pause/resume/stop controls and past meetings. The Meet caption overlay can be hidden while its text continues to feed the Side Panel.
-- Meet captions observed through MutationObserver, with reattachment when Meet rebuilds the caption region and faster caption update handling.
-- Word-overlap stitching, speaker turn merging and transcript timestamps that exclude paused time.
-- Local tab-audio capture plus optional microphone capture, device selection, live input meters, adjustable mic sensitivity, automatic gain and voice filtering/compression.
-- Optional Chrome on-device dictation for the user's own voice (language-pack availability varies); results are labelled separately from Meet's speaker-attributed captions.
-- 48 kHz Web Audio mixing with a final dynamics limiter.
+**No Python, FFmpeg, API key, local server, model download or external account is required.** The extension uses Google Meet captions and stores recordings and notes in the browser.
+
+## Transcription and speaker attribution
+
+- Remote participants' speaker-labelled text comes from Google Meet captions.
+- The observer processes visible caption cards, tracks rolling updates, handles speaker switches and deduplicates repeated DOM mutations.
+- It reattaches when Meet rebuilds the caption interface.
+- Transcript snapshots are saved periodically and after caption changes.
+- Optional Chrome on-device dictation can separately capture the user's own microphone voice when supported. It is disabled by default, may require a Chrome language pack, and does not transcribe remote participants.
+
+## Recording
+
+- Tab audio plus optional microphone capture.
+- 48 kHz Web Audio mixing, microphone gain controls, voice filtering/compression and a final limiter.
 - MP4 H.264/AAC when supported, otherwise VP8/Opus WebM.
-- WebM duration metadata and cue-point generation on finalization to improve the native seek timeline.
-- Saved video blob in IndexedDB for in-extension playback and seeking; local video data is removed when its past-meeting record is deleted.
-- Transcript export as TXT, Markdown and JSON, copy, searchable live transcript, persistent manual notes, past-meeting playback and sanitized caption diagnostics.
-- Explicit Light, Dark and System themes.
+- One-second media chunks are written to IndexedDB while recording.
+- Finalized video is retained locally for playback and seeking.
 
-## Optional open-source local transcription (CPU)
+## Important limitations
 
-The extension includes an optional WhisperX service in `transcription-service/`. On Windows, install Python 3.11 and FFmpeg, then run `transcription-service\\start.ps1` in PowerShell. Keep the service running, reload the extension, open **Past meetings**, and click **Transcribe locally** for a saved recording. It uses WhisperX with Silero VAD and CPU/int8 inference; word alignment is attempted where supported. Speaker diarization is optional and requires a Hugging Face token plus acceptance of the pyannote model terms. See [transcription-service/README.md](transcription-service/README.md) for setup and limitations. The recording is uploaded only to `127.0.0.1` after the explicit button click; no meeting media is sent to a cloud service.
+This portable build does not run its own independent ASR or diarization model. It cannot correct words Google Meet fails to recognize or recover speech for which Meet produces no caption. Accuracy depends on Meet's language support, audio quality, microphone placement, network conditions and the caption service.
 
-## Important speech-recognition limitation
-The extension records and enhances the microphone audio that is included in the saved video. Google Meet generates its speaker-attributed captions using its own microphone and speech-recognition service. The extension cannot inject its processed audio into Meet's internal caption engine. An optional Chrome on-device dictation path separately transcribes the user's own voice and labels it “You (on-device)”. It feeds the selected microphone through a local high-pass/compressor/automatic-gain audio graph into the recognizer; it requires a supported Chrome build and a locally installed language pack. Chrome's on-device speech-recognition APIs are still marked experimental and language availability varies. For best results, choose the correct microphone and spoken language in Meet settings, use a close microphone, avoid clipping, and enable Meet captions in the correct language. Very fast speech, overlapping speakers, low-quality microphones and background noise can still cause recognition errors.
+Speaker names come from Meet's caption interface. Overlapping speech, interruptions, similar voices and caption delays can still cause errors. Chrome tab capture does not provide separate participant audio tracks. Zero missed words cannot be guaranteed, including during long monologues.
 
-Mic sensitivity, automatic gain and voice enhancement apply to the saved microphone track. The on-device recognizer uses the microphone selected in the extension's microphone setup page; if no device is selected, it falls back to the browser's default microphone. Excessive gain can also raise room noise, so use the setup meter and select the lowest gain that captures normal speech clearly.
+For long meetings, keep the Meet tab open, keep captions enabled and prevent the computer from sleeping. Periodic local persistence reduces loss, but browser crashes, forced shutdowns, storage exhaustion or Meet caption outages can still interrupt capture.
 
-## Verification and known limitations
-Run `node --check background.js`, `node --check content.js`, `node --check offscreen.js`, `node --check sidepanel.js`, `node --check setup.js`, and `node --test`.
+## Verification
 
-Chrome's tab-capture source may reject exact dimensions or frame rate; requested quality is best-effort. WebM duration and cue repair is performed during finalization, but actual seeking must still be checked on real long recordings and across VLC, Chrome and other players. The extension retains a local finalized video blob for in-extension playback; this uses local browser storage and can consume substantial space for long meetings. Delete a past meeting to remove its local video data.
-
-No real Google Meet browser session, long-duration recording, multi-device microphone test or VLC/WMP compatibility test has been performed as part of this code update. Verify these in Chrome after reloading the unpacked extension.
+```bash
+node --check background.js
+node --check content.js
+node --check offscreen.js
+node --check sidepanel.js
+node --check setup.js
+node --test
+```
 
 ## Privacy
-Recordings, transcripts and microphone data remain in the local browser profile. The extension does not upload them to a remote server. The optional transcription service runs on loopback and receives a recording only after the user explicitly starts local transcription. Participants should be informed before recording.
+
+Recording and transcript data remain in the local browser profile. No meeting audio or transcript is sent to an external service by this extension. Inform participants before recording.
