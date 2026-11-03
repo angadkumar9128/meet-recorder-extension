@@ -91,10 +91,10 @@ async function playback(id){
 $('start').onclick=async()=>{
   try{const tab=await activeMeet();const settings=await chrome.storage.local.get(['myName','quality','micGain','autoGain','enhanceMic','micDeviceId','localTranscription','captionLanguage','hideMeetCaptions']);const streamId=await chrome.tabCapture.getMediaStreamId({targetTabId:tab.id});
     const r=await request('START',{tabId:tab.id,streamId,myName:settings.myName,quality:settings.quality||'high',micGain:settings.micGain??2,autoGain:settings.autoGain!==false,enhanceMic:settings.enhanceMic!==false,micDeviceId:settings.micDeviceId||null,hideMeetCaptions:settings.hideMeetCaptions!==false});
-    sessionId=r.sessionId;await refresh();if(settings.localTranscription!==false)await startLocalAsr(settings.captionLanguage||'en-US');if(!r.micOk)$('status').textContent='Recording started, but microphone access was denied. Open Settings → Test microphone / grant access, then start a new recording.';else if(!r.transcriptOk)$('status').textContent='Recording started, but Meet captions could not be attached. Reload the Meet tab and try again.';
+    sessionId=r.sessionId;await refresh();if(settings.localTranscription===true)await startLocalAsr(settings.captionLanguage||'en-US');if(!r.micOk)$('status').textContent='Recording started, but microphone access was denied. Open Settings → Test microphone / grant access, then start a new recording.';else if(!r.transcriptOk)$('status').textContent='Recording started, but Meet captions could not be attached. Reload the Meet tab and try again.';
   }catch(e){$('status').textContent=e.message;}
 };
-$('pause').onclick=async()=>{try{const resuming=state.paused;await request(resuming?'RESUME':'PAUSE');await refresh();if(resuming){const s=await chrome.storage.local.get(['localTranscription','captionLanguage']);if(s.localTranscription!==false)await startLocalAsr(s.captionLanguage||'en-US');}else stopLocalAsr(false);}catch(e){$('status').textContent=e.message;}};
+$('pause').onclick=async()=>{try{const resuming=state.paused;await request(resuming?'RESUME':'PAUSE');await refresh();if(resuming){const s=await chrome.storage.local.get(['localTranscription','captionLanguage']);if(s.localTranscription===true)await startLocalAsr(s.captionLanguage||'en-US');}else stopLocalAsr(false);}catch(e){$('status').textContent=e.message;}};
 $('stop').onclick=async()=>{try{stopLocalAsr(true);await request('STOP');await refresh();$('status').textContent='Finalizing video…';}catch(e){$('status').textContent=e.message;}};
 $('search').oninput=render;$('transcript').onscroll=()=>{scrollLatest=$('transcript').scrollHeight-$('transcript').scrollTop-$('transcript').clientHeight<35;};
 $('addNote').onclick=async()=>{const text=$('manualNote').value.trim();if(!text)return;const entry={speaker:'My note',text,t:Math.floor(elapsed()/1000),committed:true,note:true,source:'note'};$('manualNote').value='';try{await request('NOTE_UPDATE',{sessionId,entry});const latest=await request('GET_TRANSCRIPT',{sessionId});entries=latest.entries||[];render();}catch(e){$('status').textContent='Note could not be saved: '+e.message;}};
@@ -102,28 +102,6 @@ document.querySelectorAll('[data-format]').forEach(b=>b.onclick=async()=>{try{aw
 $('copy').onclick=()=>navigator.clipboard.writeText(entries.map(e=>e.speaker+' - '+e.text).join('\n\n'));
 $('video').onclick=()=>{if(sessionId)playback(sessionId);else $('status').textContent='Start and stop a recording before opening playback.';};
 document.querySelectorAll('.tab').forEach(b=>b.onclick=async()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active',x===b));['live','past','settings'].forEach(id=>$(id).hidden=id!==b.dataset.view);if(b.dataset.view==='past')await loadSessions();});
-async function transcribeSavedMeeting(session,button){
-  const original=button.textContent;button.disabled=true;button.textContent='Checking local engine…';
-  try{
-    const health=await fetch('http://127.0.0.1:8765/health');
-    if(!health.ok)throw new Error('Local transcription service is not ready. Start it with transcription-service\\start.ps1.');
-    const status=await health.json();
-    const blob=await readVideo(session.id);if(!blob)throw new Error('The saved recording is missing from this browser profile.');
-    button.textContent='Uploading to this PC…';
-    const form=new FormData();form.append('file',blob,(session.code||'meeting')+(blob.type.includes('mp4')?'.mp4':'.webm'));form.append('language','');
-    const response=await fetch('http://127.0.0.1:8765/transcribe',{method:'POST',body:form});
-    const payload=await response.json();if(!response.ok)throw new Error(payload.detail||'Local transcription failed.');
-    const imported=(payload.segments||[]).map(segment=>({
-      speaker:segment.speaker||'Speaker (unassigned)',text:segment.text,t:segment.start||0,
-      end:segment.end||segment.start||0,words:segment.words||[],committed:true,source:'whisperx'
-    }));
-    const saved=await request('IMPORT_TRANSCRIPT',{sessionId:session.id,entries:imported,language:payload.language,diarization:payload.diarization});
-    button.textContent='Transcribed ('+saved.count+')';
-    $('status').textContent='Local WhisperX transcription complete · '+payload.language+' · diarization: '+payload.diarization+'. '+(payload.alignment_warning?'Word alignment warning: '+payload.alignment_warning:'');
-    await loadSessions();
-  }catch(error){$('status').textContent=error.message||String(error);button.textContent=original;}
-  finally{button.disabled=false;}
-}
 async function loadSessions(){
   const r=await request('LIST_SESSIONS');const root=$('sessions');root.replaceChildren();
   for(const s of (r.sessions||[]).sort((a,b)=>b.startedAt-a.startedAt)){
@@ -133,14 +111,14 @@ async function loadSessions(){
     card.append(title,meta,dl);
     if(s.videoAvailable){
       const play=document.createElement('button');play.textContent='Play / seek';play.onclick=()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active',x.dataset.view==='live'));['live','past','settings'].forEach(id=>$(id).hidden=id!=='live');sessionId=s.id;playback(s.id);};card.append(play);
-      const asr=document.createElement('button');asr.textContent=s.transcriptionEngine==='WhisperX'?'Re-transcribe locally':'Transcribe locally';asr.onclick=()=>transcribeSavedMeeting(s,asr);card.append(asr);
+
     }
     const del=document.createElement('button');del.textContent='Delete';del.onclick=async()=>{await request('DELETE_SESSION',{sessionId:s.id});await loadSessions();};card.append(del);root.append(card);
   }
 }
 async function settings(){
   const s=await chrome.storage.local.get(['myName','quality','theme','micGain','autoGain','enhanceMic','localTranscription','captionLanguage']);
-  $('myName').value=s.myName||'';$('quality').value=s.quality||'high';$('theme').value=s.theme||'system';$('micGain').value=s.micGain??2;$('gainValue').textContent=(Number($('micGain').value)).toFixed(1)+'×';$('autoGain').checked=s.autoGain!==false;$('enhanceMic').checked=s.enhanceMic!==false;$('localTranscription').checked=s.localTranscription!==false;$('captionLanguage').value=s.captionLanguage||'en-US';$('hideMeetCaptions').checked=s.hideMeetCaptions!==false;document.body.dataset.theme=s.theme==='system'?'':s.theme;
+  $('myName').value=s.myName||'';$('quality').value=s.quality||'high';$('theme').value=s.theme||'system';$('micGain').value=s.micGain??2;$('gainValue').textContent=(Number($('micGain').value)).toFixed(1)+'×';$('autoGain').checked=s.autoGain!==false;$('enhanceMic').checked=s.enhanceMic!==false;$('localTranscription').checked=s.localTranscription===true;$('captionLanguage').value=s.captionLanguage||'en-US';$('hideMeetCaptions').checked=s.hideMeetCaptions!==false;document.body.dataset.theme=s.theme==='system'?'':s.theme;
 }
 $('micGain').oninput=()=>$('gainValue').textContent=Number($('micGain').value).toFixed(1)+'×';
 $('theme').onchange=()=>{document.body.dataset.theme=$('theme').value==='system'?'':$('theme').value;};
@@ -164,4 +142,4 @@ chrome.storage.onChanged.addListener((changes,area)=>{
   if(area==='local'){const c=changes['transcript:'+sessionId];if(c){entries=c.newValue||[];render();}if(changes.tabAudioLevel)$('tabMeter').value=changes.tabAudioLevel.newValue||0;if(changes.micAudioLevel)$('micMeter').value=changes.micAudioLevel.newValue||0;}
   if(area==='session'&&changes.state){state={...state,...changes.state.newValue};sessionId=state.sessionId||sessionId;renderState();}
 });
-(async()=>{await settings();await refresh();if(state.recording&&!state.paused){const s=await chrome.storage.local.get(['localTranscription','captionLanguage']);if(s.localTranscription!==false)await startLocalAsr(s.captionLanguage||'en-US');}})();
+(async()=>{await settings();await refresh();if(state.recording&&!state.paused){const s=await chrome.storage.local.get(['localTranscription','captionLanguage']);if(s.localTranscription===true)await startLocalAsr(s.captionLanguage||'en-US');}})();
