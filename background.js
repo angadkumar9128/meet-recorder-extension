@@ -44,7 +44,7 @@ chrome.runtime.onMessage.addListener((msg,sender,reply)=>{
         if(!capture||!capture.ok)throw new Error(capture&&capture.error||'Could not start recording.');
         let transcriptOk=true;try{await sendTab(tab.id,{type:'START_TRANSCRIPT',startedAt,sessionId});}catch{transcriptOk=false;}
         const state={recording:true,paused:false,tabId:tab.id,sessionId,startedAt,myName:msg.myName||'You',code:codeFrom(tab.url),stamp:stamp(startedAt),quality:msg.quality||'high'};
-        await setState(state);await chrome.storage.local.set({activeSessionId:sessionId,'transcript:'+sessionId:[],pendingRecoverable:true});
+        await setState(state);await chrome.storage.local.set({activeSessionId:sessionId,['transcript:'+sessionId]:[],pendingRecoverable:true});
         await chrome.action.setBadgeBackgroundColor({color:'#d93025'});await chrome.action.setBadgeText({text:'REC'});
         reply({ok:true,micOk:capture.micOk,transcriptOk,sessionId});break;
       }
@@ -59,11 +59,11 @@ chrome.runtime.onMessage.addListener((msg,sender,reply)=>{
       }
       case 'GET_STATE':reply(await getState());break;
       case 'GET_TRANSCRIPT':{
-        const s=await getState();const id=msg.sessionId||s.sessionId;const d=await chrome.storage.local.get('transcript:'+id);reply({entries:d['transcript:'+id]||[]});break;
+        const s=await getState();const id=msg.sessionId||s.sessionId;if(!id){reply({entries:[]});break;}const d=await chrome.storage.local.get('transcript:'+id);reply({entries:d['transcript:'+id]||[]});break;
       }
       case 'TRANSCRIPT_UPDATE':{
         const s=await getState();const id=msg.sessionId||s.sessionId;if(!id)throw new Error('No active meeting session.');
-        await chrome.storage.local.set({'transcript:'+id:msg.entries||[]});await saveSession({...s,sessionId:id},msg.entries||[],s.recording?'recording':'saved');reply({ok:true});break;
+        const entries=msg.entries||[];await chrome.storage.local.set({['transcript:'+id]:entries});await saveSession({...s,sessionId:id},entries,s.recording?'recording':'saved');reply({ok:true});break;
       }
       case 'LIST_SESSIONS':{const d=await chrome.storage.local.get('sessions');reply({sessions:d.sessions||[]});break;}
       case 'DOWNLOAD_TRANSCRIPT':await downloadTranscript(msg.sessionId,msg.format||'txt');reply({ok:true});break;
