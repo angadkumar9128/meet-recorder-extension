@@ -15,6 +15,7 @@ from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).with_name('.env'))
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 APP_HOST = os.getenv("MEETNOTEBOOK_HOST", "127.0.0.1")
 MAX_UPLOAD_BYTES = int(os.getenv("MEETNOTEBOOK_MAX_UPLOAD_MB", "2048")) * 1024 * 1024
@@ -40,7 +41,7 @@ async def restrict_browser_origins(request: Request, call_next):
         or origin.startswith("http://127.0.0.1")
         or origin.startswith("http://localhost")
     ):
-        return __import__("fastapi").responses.JSONResponse(
+        return JSONResponse(
             status_code=403, content={"detail": "Only the Meet Notebook extension or loopback clients are allowed."}
         )
     return await call_next(request)
