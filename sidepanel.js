@@ -132,7 +132,7 @@ $('installSpeechPack').onclick=async()=>{
 $('micSetup').onclick=()=>chrome.tabs.create({url:chrome.runtime.getURL('setup.html')});
 $('save').onclick=async()=>{
   const s={myName:$('myName').value.trim(),quality:$('quality').value,theme:$('theme').value,micGain:Number($('micGain').value),autoGain:$('autoGain').checked,enhanceMic:$('enhanceMic').checked,localTranscription:$('localTranscription').checked,captionLanguage:$('captionLanguage').value,hideMeetCaptions:$('hideMeetCaptions').checked};
-  await chrome.storage.local.set(s);document.body.dataset.theme=s.theme==='system'?'':s.theme;if(state.recording){if(s.localTranscription){stopLocalAsr(false);await startLocalAsr(s.captionLanguage);}else stopLocalAsr(true);}$('status').textContent='Settings saved. Audio changes apply to the next recording.';
+  await chrome.storage.local.set(s);document.body.dataset.theme=s.theme==='system'?'':s.theme;if(state.recording){const [activeTab]=await chrome.tabs.query({active:true,currentWindow:true});if(activeTab?.id)await chrome.tabs.sendMessage(activeTab.id,{type:'SET_CAPTION_VISIBILITY',hidden:s.hideMeetCaptions}).catch(()=>{});if(s.localTranscription){stopLocalAsr(false);await startLocalAsr(s.captionLanguage);}else stopLocalAsr(true);}$('status').textContent='Settings saved. Audio changes apply to the next recording.';
 };
 $('diagnostics').onclick=async()=>{try{const tab=await activeMeet();const r=await request('DIAGNOSE',{tabId:tab.id});if(!r.found)throw new Error('Meet captions were not found. Turn on CC.');await navigator.clipboard.writeText(r.html);$('status').textContent='Sanitized diagnostics copied.';}catch(e){$('status').textContent=e.message;}};
 chrome.storage.onChanged.addListener((changes,area)=>{
