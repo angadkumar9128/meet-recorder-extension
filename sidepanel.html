@@ -20,6 +20,7 @@
 <label class="check-label"><input id="hideMeetCaptions" type="checkbox" checked> Hide Meet captions on the meeting screen (keep them in this side panel)</label>
 <label>Meeting audio language<select id="captionLanguage"><option value="en-US">English (US)</option><option value="en-IN">English (India)</option><option value="hi-IN">Hindi (India)</option><option value="en-GB">English (UK)</option><option value="es-ES">Spanish</option><option value="fr-FR">French</option></select></label>
 <button id="installSpeechPack">Install / check local speech model</button>
+<p id="speechModelStatus" class="hint" role="status" aria-live="polite">Choose a language, then check or install its local model. This status stays visible in Settings.</p>
 <button id="micSetup">Test microphone / grant access</button>
 <p class="hint">Meet captions provide speaker names. An additional on-device recognizer transcribes the mixed meeting audio (all participants) to recover words missing from Meet captions. Install the selected Chrome language model once before recording. Audio-backup text cannot be assigned reliably to individual speakers. No API key, server or external account is used. Sensitivity and voice enhancement affect the recorded audio.</p>
 <p class="privacy">Recordings and transcripts stay in this browser. Tell all participants before recording.</p>
