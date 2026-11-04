@@ -134,19 +134,21 @@
     }, 850));
   }
 
+  function flushPublish() {
+    if (publishTimer) { clearTimeout(publishTimer); publishTimer = null; }
+    if (!sessionId) return publishQueue;
+    const snapshot = entries.map(entry => ({ ...entry }));
+    const id = sessionId;
+    publishQueue = publishQueue
+      .then(() => sendRuntimeMessage({ type: 'TRANSCRIPT_UPDATE', sessionId: id, entries: snapshot }))
+      .catch(() => {});
+    return publishQueue;
+  }
   function publish() {
     if (!sessionId || publishTimer) return;
     // A fixed-rate trailing publish prevents a continuous speaker from continually
     // resetting a debounce timer and starving the live side panel of updates.
-    publishTimer = setTimeout(() => {
-      publishTimer = null;
-      if (!sessionId) return;
-      const snapshot = entries.map(entry => ({ ...entry }));
-      const id = sessionId;
-      publishQueue = publishQueue
-        .then(() => sendRuntimeMessage({ type: 'TRANSCRIPT_UPDATE', sessionId: id, entries: snapshot }))
-        .catch(() => {});
-    }, 120);
+    publishTimer = setTimeout(() => { publishTimer = null; flushPublish(); }, 120);
   }
 
   function scan() {
@@ -294,7 +296,7 @@
     scan();
   }
 
-  function stop() {
+  async function stop() {
     if (!paused) {
       elapsedBeforePause += activeSegmentStart ? performance.now() - activeSegmentStart : 0;
       activeSegmentStart = 0;
@@ -303,6 +305,7 @@
     for (const timer of commitTimers.values()) clearTimeout(timer);
     commitTimers.clear();
     entries.forEach(entry => { entry.committed = true; });
+    await flushPublish();
     setCaptionVisibility(false);
     cleanup();
     return entries;
@@ -326,7 +329,7 @@
   chrome.runtime.onMessage.addListener((message, _sender, reply) => {
     if (message.type === 'SET_CAPTION_VISIBILITY') { setCaptionVisibility(message.hidden); reply({ ok: true }); }
     else if (message.type === 'START_TRANSCRIPT') { start(message); reply({ ok: true }); }
-    else if (message.type === 'STOP_TRANSCRIPT') reply({ entries: stop() });
+    else if (message.type === 'STOP_TRANSCRIPT') { stop().then(entries => reply({ entries })).catch(error => reply({ entries: [], error: error.message || String(error) })); return true; }
     else if (message.type === 'PAUSE_TRANSCRIPT') { pause(); reply({ ok: true }); }
     else if (message.type === 'RESUME_TRANSCRIPT') { resume(); reply({ ok: true }); }
     else if (message.type === 'DIAGNOSE') reply(diagnose());
