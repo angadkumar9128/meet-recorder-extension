@@ -35,7 +35,7 @@ This dual-source design should capture more spoken content than Meet captions al
 - The independent audio transcript covers the mixed meeting audio, including remote participants and the local participant when their voice is present in the captured mix.
 - Meet captions remain the source for speaker names. The local audio backup does not have reliable per-person diarization.
 - When the local model is unavailable or local transcription is disabled, Meet captions continue as the fallback.
-- Overlapping speakers, interruptions, uncommon names, technical terms and language switching can still produce errors. Zero missed words cannot be guaranteed.
+- Overlapping speakers, interruptions, uncommon names, technical terms and language switching can still produce errors. Since the two recognizers are independent, the same phrase may occasionally appear in both sources; the source labels make this visible rather than silently deleting potentially useful words. Zero missed words cannot be guaranteed.
 
 ## Recording
 
