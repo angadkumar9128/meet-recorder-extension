@@ -33,7 +33,7 @@ chrome.runtime.onMessage.addListener((msg,sender,reply)=>{
         const old=await getState();if(old.recording)throw new Error('A recording is already active.');
         const tab=await chrome.tabs.get(msg.tabId);if(!tab.url||!tab.url.startsWith('https://meet.google.com/'))throw new Error('Open a Google Meet tab first.');
         await ensureOffscreen();const sessionId=crypto.randomUUID();const startedAt=Date.now();
-        await chrome.storage.local.set({activeSessionId:sessionId,['transcript:'+sessionId]:[],pendingRecoverable:true});
+        await chrome.storage.local.set({activeSessionId:sessionId,['transcript:'+sessionId]:[],pendingRecoverable:true,audioTranscriptionStatus:''});
         const capture=await chrome.runtime.sendMessage({target:'offscreen',type:'START',streamId:msg.streamId,sessionId,quality:msg.quality||'high',micGain:msg.micGain||2,autoGain:msg.autoGain!==false,enhanceMic:msg.enhanceMic!==false,micDeviceId:msg.micDeviceId||null,audioTranscription:msg.audioTranscription===true,speechLanguage:msg.speechLanguage||'en-US'});
         if(!capture||!capture.ok)throw new Error(capture&&capture.error||'Could not start recording.');
         let transcriptOk=true;try{await sendTab(tab.id,{type:'START_TRANSCRIPT',startedAt,sessionId,hideNativeCaptions:msg.hideMeetCaptions!==false});}catch{transcriptOk=false;}
