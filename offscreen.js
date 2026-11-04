@@ -16,7 +16,7 @@ async function stopAudioRecognition(final=false){
   if(speechRecognizer){
     const current=speechRecognizer;
     await new Promise(resolve=>{
-      const timeout=setTimeout(resolve,1200);
+      const timeout=setTimeout(resolve,2500);
       current.onend=()=>{clearTimeout(timeout);resolve();};
       try{current.stop();}catch{clearTimeout(timeout);resolve();}
     });
@@ -107,7 +107,7 @@ async function repairWebm(input,durationMs){
 }
 async function start(msg){
   if(recorder&&recorder.state!=='inactive')throw new Error('Recorder is already active.');
-  sessionId=msg.sessionId;chunkIndex=0;chunkWrites=[];activeElapsedMs=0;segmentStartedAt=0;speechEnabled=msg.audioTranscription===true;speechLanguage=msg.speechLanguage||'en-US';speechPaused=false;speechTrack=null;
+  sessionId=msg.sessionId;chunkIndex=0;chunkWrites=[];activeElapsedMs=0;segmentStartedAt=0;speechEnabled=msg.audioTranscription===true;speechLanguage=msg.speechLanguage||'en-US';speechPaused=false;speechTrack=null;speechSaveQueue=Promise.resolve();
   baseMicGain=clamp(Number(msg.micGain)||2,.5,5);autoGain=msg.autoGain!==false;enhanceMic=msg.enhanceMic!==false;
   const preset=PRESETS[msg.quality]||PRESETS.high;
   tabStream=await navigator.mediaDevices.getUserMedia({audio:{mandatory:{chromeMediaSource:'tab',chromeMediaSourceId:msg.streamId}},video:{mandatory:{chromeMediaSource:'tab',chromeMediaSourceId:msg.streamId}}});
