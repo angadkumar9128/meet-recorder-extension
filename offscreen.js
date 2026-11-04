@@ -27,11 +27,12 @@ async function stopAudioRecognition(final=false){
   if(final)speechTrack=null;
 }
 function launchAudioRecognition(){
-  if(!speechEnabled||speechPaused||!speechTrack||!recorder||recorder.state!=='recording')return;
+  if(!speechEnabled||speechPaused||!speechTrack||!recorder||recorder.state!=='recording'||speechRecognizer)return;
   const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
   if(!SR){chrome.runtime.sendMessage({type:'AUDIO_TRANSCRIPTION_STATUS',sessionId,error:'Chrome on-device Speech Recognition is unavailable in this extension context.'}).catch(()=>{});return;}
   const recognition=new SR();
   recognition.lang=speechLanguage;recognition.continuous=true;recognition.interimResults=false;recognition.processLocally=true;
+  recognition.onstart=()=>chrome.runtime.sendMessage({type:'AUDIO_TRANSCRIPTION_STATUS',sessionId,error:'Local audio transcription is running ('+speechLanguage+').'}).catch(()=>{});
   recognition.onresult=event=>{
     for(let i=event.resultIndex;i<event.results.length;i++){
       const result=event.results[i];if(!result.isFinal)continue;
@@ -49,14 +50,14 @@ function launchAudioRecognition(){
   recognition.onend=()=>{
     if(speechRecognizer===recognition)speechRecognizer=null;
     if(speechEnabled&&!speechPaused&&recorder&&recorder.state==='recording'&&speechTrack){
-      speechRestartTimer=setTimeout(launchAudioRecognition,500);
+      clearTimeout(speechRestartTimer);speechRestartTimer=setTimeout(launchAudioRecognition,1000);
     }
   };
   speechRecognizer=recognition;
   try{recognition.start(speechTrack);}
   catch(error){
-    speechRecognizer=null;
-    chrome.runtime.sendMessage({type:'AUDIO_TRANSCRIPTION_STATUS',sessionId,error:'Could not start local audio transcription: '+(error.message||error)}).catch(()=>{});
+    speechRecognizer=null;speechEnabled=false;
+    chrome.runtime.sendMessage({type:'AUDIO_TRANSCRIPTION_STATUS',sessionId,error:'Could not start local audio transcription: '+(error.message||error)+'. Meet captions and recording can continue.'}).catch(()=>{});
   }
 }
 
