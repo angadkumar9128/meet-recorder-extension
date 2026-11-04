@@ -39,6 +39,21 @@
     (elapsedBeforePause + (activeSegmentStart ? performance.now() - activeSegmentStart : 0)) / 1000
   ));
 
+  // A Meet tab can outlive an extension update/reload. In that case Chrome
+  // invalidates the old content-script context and runtime messaging may throw
+  // synchronously (before returning a Promise). Treat that as a stale session.
+  function sendRuntimeMessage(message) {
+    try {
+      if (typeof chrome === 'undefined' || !chrome.runtime || !chrome.runtime.id) {
+        return Promise.resolve(null);
+      }
+      return chrome.runtime.sendMessage(message).catch(() => null);
+    } catch (_) {
+      return Promise.resolve(null);
+    }
+  }
+
+
   function region() {
     for (const selector of SELECTORS.regions) {
       const element = document.querySelector(selector);
@@ -129,7 +144,7 @@
       const snapshot = entries.map(entry => ({ ...entry }));
       const id = sessionId;
       publishQueue = publishQueue
-        .then(() => chrome.runtime.sendMessage({ type: 'TRANSCRIPT_UPDATE', sessionId: id, entries: snapshot }))
+        .then(() => sendRuntimeMessage({ type: 'TRANSCRIPT_UPDATE', sessionId: id, entries: snapshot }))
         .catch(() => {});
     }, 120);
   }
@@ -260,7 +275,7 @@
     reattachTimer = setInterval(() => { enableCaptions(); attach(); }, 1800);
     persistTimer = setInterval(publish, 1000);
     rosterTimer = setInterval(() => {
-      chrome.runtime.sendMessage({ type: 'ROSTER_UPDATE', sessionId, participants: participants() }).catch(() => {});
+      sendRuntimeMessage({ type: 'ROSTER_UPDATE', sessionId, participants: participants() });
     }, 10000);
   }
 
