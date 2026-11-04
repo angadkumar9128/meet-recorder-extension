@@ -78,7 +78,8 @@ async function settings(){
 $('micGain').oninput=()=>$('gainValue').textContent=Number($('micGain').value).toFixed(1)+'×';
 $('theme').onchange=()=>{document.body.dataset.theme=$('theme').value==='system'?'':$('theme').value;};
 $('installSpeechPack').onclick=async()=>{
-  try{await checkLocalSpeechModel($('captionLanguage').value,true);$('status').textContent='Local '+$('captionLanguage').value+' model is installed. Full meeting audio transcription will be enabled for the next recording.';}
+  const lang=$('captionLanguage').value;
+  try{await checkLocalSpeechModel(lang,true);$('audioTranscription').checked=true;await chrome.storage.local.set({audioTranscription:true,captionLanguage:lang});$('status').textContent='Local '+lang+' model is installed. Full meeting audio transcription is enabled.';}
   catch(e){$('status').textContent=e.message||String(e);}
 };
 $('micSetup').onclick=()=>chrome.tabs.create({url:chrome.runtime.getURL('setup.html')});
@@ -88,7 +89,7 @@ $('save').onclick=async()=>{
 };
 $('diagnostics').onclick=async()=>{try{const tab=await activeMeet();const r=await request('DIAGNOSE',{tabId:tab.id});if(!r.found)throw new Error('Meet captions were not found. Turn on CC.');await navigator.clipboard.writeText(r.html);$('status').textContent='Sanitized diagnostics copied.';}catch(e){$('status').textContent=e.message;}};
 chrome.storage.onChanged.addListener((changes,area)=>{
-  if(area==='local'){const c=changes['transcript:'+sessionId];if(c){entries=c.newValue||[];render();}if(changes.tabAudioLevel)$('tabMeter').value=changes.tabAudioLevel.newValue||0;if(changes.micAudioLevel)$('micMeter').value=changes.micAudioLevel.newValue||0;}
+  if(area==='local'){const c=changes['transcript:'+sessionId];if(c){entries=c.newValue||[];render();}if(changes.tabAudioLevel)$('tabMeter').value=changes.tabAudioLevel.newValue||0;if(changes.micAudioLevel)$('micMeter').value=changes.micAudioLevel.newValue||0;if(changes.audioTranscriptionStatus)$('status').textContent=changes.audioTranscriptionStatus.newValue||'';}
   if(area==='session'&&changes.state){state={...state,...changes.state.newValue};sessionId=state.sessionId||sessionId;renderState();}
 });
 (async()=>{await settings();await refresh();})();
