@@ -153,7 +153,7 @@
       if (previousForNode && previousForNode.fingerprint === key) continue;
 
       const now = Date.now();
-      if (previousForNode && previousForNode.speaker.toLowerCase() === speaker.toLowerCase()) {
+      if (previousForNode?.entry && previousForNode.speaker.toLowerCase() === speaker.toLowerCase()) {
         const merged = MeetNotebookTranscript.mergeRollingText(previousForNode.entry.text, text);
         previousForNode.entry.text = merged;
         previousForNode.entry.updatedAt = now;
