@@ -34,35 +34,31 @@ async function checkLocalSpeechModel(lang,install=false){
     throw new Error('This Chrome installation does not expose local speech-model management. Update Chrome and reopen the extension.');
   }
   const options={langs:[lang],processLocally:true};
+  if(install){
+    // Invoke install directly from the button gesture. install() is idempotent:
+    // it resolves true when the requested language pack is already installed.
+    setSpeechModelStatus('Starting Chrome’s '+lang+' speech-model check / download…');
+    let installed;
+    try{installed=await SR.install({langs:[lang]});}
+    catch(error){throw new Error('Chrome could not install the '+lang+' speech model: '+(error.message||error));}
+    if(!installed)throw new Error('Chrome reported that the '+lang+' speech model could not be installed. Check your connection and try again.');
+    setSpeechModelStatus('Download completed. Verifying the '+lang+' model…');
+    let verified;
+    try{verified=await SR.available(options);}
+    catch(error){throw new Error('The model download finished, but Chrome could not verify it: '+(error.message||error));}
+    if(verified!=='available')throw new Error('Chrome did not confirm that the '+lang+' model is ready (status: '+verified+'). Please retry.');
+    setSpeechModelStatus('Installed and verified: '+lang+'. Local meeting transcription is ready.');
+    return true;
+  }
   setSpeechModelStatus('Checking Chrome local speech model for '+lang+'…');
   let availability;
   try{availability=await SR.available(options);}
   catch(error){throw new Error('Chrome could not check the local speech model: '+(error.message||error));}
-  if(availability==='available'){
-    setSpeechModelStatus('Ready: the '+lang+' local speech model is already installed.');
-    return true;
-  }
+  if(availability==='available')return true;
   if(availability==='unavailable'){
-    throw new Error('Chrome does not offer an on-device speech model for '+lang+'. Try English (US) or another supported language.');
+    throw new Error('Chrome does not offer an on-device speech model for '+lang+'. For English choose English (US); for Hindi choose Hindi (India).');
   }
-  if(!install){
-    throw new Error('The '+lang+' local speech model is not installed. Open Settings and click Install / check local speech model.');
-  }
-  setSpeechModelStatus('Downloading Chrome’s '+lang+' speech model. Keep this panel open until it finishes…');
-  let installed;
-  try{
-    // install() accepts only the language list. processLocally belongs to available().
-    installed=await SR.install({langs:[lang]});
-  }catch(error){
-    throw new Error('Chrome could not install the '+lang+' speech model: '+(error.message||error));
-  }
-  if(!installed)throw new Error('Chrome reported that the '+lang+' speech model could not be installed. Check your connection and try again.');
-  let verified;
-  try{verified=await SR.available(options);}
-  catch(error){throw new Error('The model download finished, but Chrome could not verify it: '+(error.message||error));}
-  if(verified!=='available')throw new Error('Chrome did not confirm that the '+lang+' model is ready. Please retry the installation.');
-  setSpeechModelStatus('Installed and verified: '+lang+'. Local meeting transcription is ready.');
-  return true;
+  throw new Error('The '+lang+' local speech model is not installed. Open Settings and click Install / check local speech model.');
 }
 function openDb(){return new Promise((resolve,reject)=>{const r=indexedDB.open('meet-notebook-media',2);r.onupgradeneeded=()=>{const db=r.result;if(!db.objectStoreNames.contains('chunks'))db.createObjectStore('chunks',{keyPath:['sessionId','index']});if(!db.objectStoreNames.contains('videos'))db.createObjectStore('videos',{keyPath:'sessionId'});};r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});}
 async function readVideo(id){const db=await openDb();return new Promise((resolve,reject)=>{const tx=db.transaction('videos','readonly');const r=tx.objectStore('videos').get(id);r.onsuccess=()=>resolve(r.result?.blob||null);r.onerror=()=>reject(r.error);tx.oncomplete=()=>db.close();});}
