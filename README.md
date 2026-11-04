@@ -23,7 +23,7 @@ Meet Notebook now uses two complementary sources:
 
 The audio backup is labelled **Meeting audio (all speakers)**. Because Chrome receives one mixed audio track, it cannot reliably identify which participant spoke each word. It is intentionally kept separate from Meet's speaker-attributed captions rather than inventing speaker identities.
 
-The local recognizer runs with `processLocally = true`. The selected language pack is downloaded once through Chrome's on-device speech recognition API and reused for later meetings. Language availability depends on the Chrome build and platform. If Chrome reports that a language is unavailable, choose another supported language in Settings.
+The local recognizer runs with `processLocally = true`. The installer probes `conversation`, `dictation`, then `command` quality and installs the highest quality available for the selected language and device. The selected language/quality pack is downloaded once through Chrome's on-device speech recognition API and reused for later meetings. Quality availability depends on the Chrome build, platform and device. Lower quality levels may be less suitable for overlapping multi-speaker meetings.
 
 ## Accuracy and limitations
 
@@ -62,6 +62,14 @@ node --test
 The independent speech recognizer is explicitly configured for on-device processing. The extension does not send meeting audio or transcripts to an external transcription API or server. Google Meet captions are still supplied by Google Meet itself. Recordings and transcripts are stored in the local browser profile. Inform participants before recording.
 
 ## Release notes
+
+### 1.5.5 — Adaptive on-device speech model quality
+
+- Probes Chrome's `conversation`, `dictation` and `command` model qualities in descending order instead of assuming every device supports meeting-grade conversation models.
+- Installs the highest available quality and stores the selected quality for subsequent recordings.
+- Passes the selected quality to the offscreen recognizer and uses it when starting local audio recognition.
+- Reports language/quality availability separately from download failures; Meet captions and recording remain usable when no local model is available.
+
 
 ### 1.5.4 — Meeting-quality local speech model installation
 
