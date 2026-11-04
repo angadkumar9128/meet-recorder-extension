@@ -63,6 +63,16 @@ The independent speech recognizer is explicitly configured for on-device process
 
 ## Release notes
 
+### 1.5.1 — Speech model installer and repeated-result fixes
+
+- Shows installation progress and errors inside the visible Settings panel.
+- Uses the documented language-only argument for `SpeechRecognition.install()`, then verifies installation with `available()`.
+- Automatically enables local audio transcription after successful installation.
+- Removes a stale stop-handler call that could prevent the recording from stopping.
+- Prevents overlapping recognizer instances and makes restarts wait for the previous recognition session to end.
+- Merges cumulative and near-identical local audio snapshots within a short 12-second window while preserving Meet captions, notes and later genuine repetitions.
+- Adds regression tests for the repeated phrase pattern reported by the user.
+
 ### 1.5.0 — Independent local audio transcription
 
 - Added a second transcription source using Chrome's on-device Speech Recognition API.
