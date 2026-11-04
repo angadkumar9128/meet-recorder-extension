@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
   "name": "Meet Notebook",
-  "version": "1.4.3",
+  "version": "1.5.0",
   "description": "Portable, local-first Google Meet recording and speaker-labelled caption notebook.",
-  "minimum_chrome_version": "116",
+  "minimum_chrome_version": "139",
   "permissions": [
     "tabCapture",
     "offscreen",
