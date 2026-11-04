@@ -63,6 +63,13 @@ The independent speech recognizer is explicitly configured for on-device process
 
 ## Release notes
 
+### 1.5.2 — Installer activation and ASR snapshot fixes
+
+- Calls Chrome's idempotent `SpeechRecognition.install({ langs: [language] })` directly from the Settings button click, then verifies the installed model with `available()`.
+- Displays progress, success and failure in a dedicated visible Settings status area.
+- Lists Chrome's documented on-device language choices; actual availability is still checked on the current device.
+- Merges near-identical rolling local-ASR snapshots in a 12-second window to suppress repeated phrase variants while preserving later repetitions.
+
 ### 1.5.1 — Speech model installer and repeated-result fixes
 
 - Shows installation progress and errors inside the visible Settings panel.
