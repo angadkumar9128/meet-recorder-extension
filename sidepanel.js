@@ -23,19 +23,45 @@ async function refresh(){
   if(sessionId){const r=await request('GET_TRANSCRIPT',{sessionId});entries=r.entries||[];render();}
   clearInterval(timer);timer=setInterval(renderState,250);
 }
+function setSpeechModelStatus(message,isError=false){
+  const output=$('speechModelStatus');
+  if(output){output.textContent=message;output.dataset.state=isError?'error':'info';}
+  if($('status'))$('status').textContent=message;
+}
 async function checkLocalSpeechModel(lang,install=false){
   const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
-  if(!SR||typeof SR.available!=='function'||typeof SR.install!=='function')throw new Error('On-device speech recognition requires Chrome 139 or newer with local speech recognition support.');
+  if(!SR||typeof SR.available!=='function'||typeof SR.install!=='function'){
+    throw new Error('This Chrome installation does not expose local speech-model management. Update Chrome and reopen the extension.');
+  }
   const options={langs:[lang],processLocally:true};
-  let availability=await SR.available(options);
-  if(availability==='available')return true;
-  if(availability==='unavailable')throw new Error('Chrome does not provide a local speech model for '+lang+'. Choose another language.');
-  if(!install)throw new Error('The '+lang+' local speech model is not installed yet. Open Settings and click Install local speech model once.');
-  $('status').textContent='Downloading Chrome’s local '+lang+' speech model. This is a one-time download…';
-  const installed=await SR.install(options);
-  if(!installed)throw new Error('Chrome could not install the '+lang+' speech model.');
-  availability=await SR.available(options);
-  if(availability!=='available')throw new Error('The local speech model is not ready yet. Please try again.');
+  setSpeechModelStatus('Checking Chrome local speech model for '+lang+'…');
+  let availability;
+  try{availability=await SR.available(options);}
+  catch(error){throw new Error('Chrome could not check the local speech model: '+(error.message||error));}
+  if(availability==='available'){
+    setSpeechModelStatus('Ready: the '+lang+' local speech model is already installed.');
+    return true;
+  }
+  if(availability==='unavailable'){
+    throw new Error('Chrome does not offer an on-device speech model for '+lang+'. Try English (US) or another supported language.');
+  }
+  if(!install){
+    throw new Error('The '+lang+' local speech model is not installed. Open Settings and click Install / check local speech model.');
+  }
+  setSpeechModelStatus('Downloading Chrome’s '+lang+' speech model. Keep this panel open until it finishes…');
+  let installed;
+  try{
+    // install() accepts only the language list. processLocally belongs to available().
+    installed=await SR.install({langs:[lang]});
+  }catch(error){
+    throw new Error('Chrome could not install the '+lang+' speech model: '+(error.message||error));
+  }
+  if(!installed)throw new Error('Chrome reported that the '+lang+' speech model could not be installed. Check your connection and try again.');
+  let verified;
+  try{verified=await SR.available(options);}
+  catch(error){throw new Error('The model download finished, but Chrome could not verify it: '+(error.message||error));}
+  if(verified!=='available')throw new Error('Chrome did not confirm that the '+lang+' model is ready. Please retry the installation.');
+  setSpeechModelStatus('Installed and verified: '+lang+'. Local meeting transcription is ready.');
   return true;
 }
 function openDb(){return new Promise((resolve,reject)=>{const r=indexedDB.open('meet-notebook-media',2);r.onupgradeneeded=()=>{const db=r.result;if(!db.objectStoreNames.contains('chunks'))db.createObjectStore('chunks',{keyPath:['sessionId','index']});if(!db.objectStoreNames.contains('videos'))db.createObjectStore('videos',{keyPath:'sessionId'});};r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});}
@@ -50,7 +76,7 @@ $('start').onclick=async()=>{
   }catch(e){$('status').textContent=e.message;}
 };
 $('pause').onclick=async()=>{try{const resuming=state.paused;await request(resuming?'RESUME':'PAUSE');await refresh();}catch(e){$('status').textContent=e.message;}};
-$('stop').onclick=async()=>{try{stopLocalAsr(true);await request('STOP');await refresh();$('status').textContent='Finalizing video…';}catch(e){$('status').textContent=e.message;}};
+$('stop').onclick=async()=>{try{await request('STOP');await refresh();$('status').textContent='Finalizing video…';}catch(e){$('status').textContent=e.message;}};
 $('search').oninput=render;$('transcript').onscroll=()=>{scrollLatest=$('transcript').scrollHeight-$('transcript').scrollTop-$('transcript').clientHeight<35;};
 $('addNote').onclick=async()=>{const text=$('manualNote').value.trim();if(!text)return;const entry={speaker:'My note',text,t:Math.floor(elapsed()/1000),committed:true,note:true,source:'note'};$('manualNote').value='';try{await request('NOTE_UPDATE',{sessionId,entry});const latest=await request('GET_TRANSCRIPT',{sessionId});entries=latest.entries||[];render();}catch(e){$('status').textContent='Note could not be saved: '+e.message;}};
 document.querySelectorAll('[data-format]').forEach(b=>b.onclick=async()=>{try{await request('DOWNLOAD_TRANSCRIPT',{sessionId,format:b.dataset.format});}catch(e){$('status').textContent=e.message;}});
@@ -78,9 +104,19 @@ async function settings(){
 $('micGain').oninput=()=>$('gainValue').textContent=Number($('micGain').value).toFixed(1)+'×';
 $('theme').onchange=()=>{document.body.dataset.theme=$('theme').value==='system'?'':$('theme').value;};
 $('installSpeechPack').onclick=async()=>{
-  const lang=$('captionLanguage').value;
-  try{await checkLocalSpeechModel(lang,true);$('audioTranscription').checked=true;await chrome.storage.local.set({audioTranscription:true,captionLanguage:lang});$('status').textContent='Local '+lang+' model is installed. Full meeting audio transcription is enabled.';}
-  catch(e){$('status').textContent=e.message||String(e);}
+  const button=$('installSpeechPack'),lang=$('captionLanguage').value;
+  if(button.disabled)return;
+  button.disabled=true;button.textContent='Checking / installing…';
+  try{
+    await checkLocalSpeechModel(lang,true);
+    $('audioTranscription').checked=true;
+    await chrome.storage.local.set({audioTranscription:true,captionLanguage:lang});
+    setSpeechModelStatus('Installed and enabled: '+lang+'. Start your next recording to transcribe the full meeting audio locally.');
+  }catch(error){
+    setSpeechModelStatus(error.message||String(error),true);
+  }finally{
+    button.disabled=false;button.textContent='Install / check local speech model';
+  }
 };
 $('micSetup').onclick=()=>chrome.tabs.create({url:chrome.runtime.getURL('setup.html')});
 $('save').onclick=async()=>{
@@ -89,7 +125,7 @@ $('save').onclick=async()=>{
 };
 $('diagnostics').onclick=async()=>{try{const tab=await activeMeet();const r=await request('DIAGNOSE',{tabId:tab.id});if(!r.found)throw new Error('Meet captions were not found. Turn on CC.');await navigator.clipboard.writeText(r.html);$('status').textContent='Sanitized diagnostics copied.';}catch(e){$('status').textContent=e.message;}};
 chrome.storage.onChanged.addListener((changes,area)=>{
-  if(area==='local'){const c=changes['transcript:'+sessionId];if(c){entries=c.newValue||[];render();}if(changes.tabAudioLevel)$('tabMeter').value=changes.tabAudioLevel.newValue||0;if(changes.micAudioLevel)$('micMeter').value=changes.micAudioLevel.newValue||0;if(changes.audioTranscriptionStatus)$('status').textContent=changes.audioTranscriptionStatus.newValue||'';}
+  if(area==='local'){const c=changes['transcript:'+sessionId];if(c){entries=c.newValue||[];render();}if(changes.tabAudioLevel)$('tabMeter').value=changes.tabAudioLevel.newValue||0;if(changes.micAudioLevel)$('micMeter').value=changes.micAudioLevel.newValue||0;if(changes.audioTranscriptionStatus){$('status').textContent=changes.audioTranscriptionStatus.newValue||'';setSpeechModelStatus(changes.audioTranscriptionStatus.newValue||'');}}
   if(area==='session'&&changes.state){state={...state,...changes.state.newValue};sessionId=state.sessionId||sessionId;renderState();}
 });
 (async()=>{await settings();await refresh();})();
