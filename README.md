@@ -58,3 +58,9 @@ Recording and transcript data remain in the local browser profile. No meeting au
 - Recreated caption cards are checked for rolling-text overlap to reduce repeated partial sentences.
 - Rolling corrections replace the changed tail instead of duplicating the earlier words.
 - The extension still uses Google Meet captions as its speaker-labelled source; recognition accuracy is therefore bounded by Meet's caption engine and selected caption language.
+
+### Cumulative caption snapshot fix (1.4.3)
+
+- Detects long rolling caption snapshots even when Google Meet rebuilds its caption DOM card.
+- Replaces revised caption tails instead of appending a near-complete repeated sentence.
+- Keeps the active same-speaker rolling caption associated for up to 90 seconds while it continues updating.
