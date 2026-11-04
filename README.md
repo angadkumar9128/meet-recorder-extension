@@ -50,3 +50,11 @@ node --test
 ## Privacy
 
 Recording and transcript data remain in the local browser profile. No meeting audio or transcript is sent to an external service by this extension. Inform participants before recording.
+
+### Live caption reliability improvements (1.4.2)
+
+- Live caption snapshots are published on a steady short interval so continuous speech does not keep resetting a debounce timer.
+- Caption updates are merged per caption card rather than merging every consecutive phrase from the same speaker.
+- Recreated caption cards are checked for rolling-text overlap to reduce repeated partial sentences.
+- Rolling corrections replace the changed tail instead of duplicating the earlier words.
+- The extension still uses Google Meet captions as its speaker-labelled source; recognition accuracy is therefore bounded by Meet's caption engine and selected caption language.
