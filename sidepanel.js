@@ -33,30 +33,43 @@ async function checkLocalSpeechModel(lang,install=false){
   if(!SR||typeof SR.available!=='function'||typeof SR.install!=='function'){
     throw new Error('This Chrome installation does not expose local speech-model management. Update Chrome and reopen the extension.');
   }
-  const options={langs:[lang],processLocally:true};
+  // Meetings need the highest-complexity local pack: continuous speech,
+  // background noise and multiple primary speakers.
+  const options={langs:[lang],processLocally:true,quality:'conversation'};
   if(install){
-    // Invoke install directly from the button gesture. install() is idempotent:
-    // it resolves true when the requested language pack is already installed.
-    setSpeechModelStatus('Starting Chrome’s '+lang+' speech-model check / download…');
+    // Keep install() as the first asynchronous operation so the call remains
+    // directly associated with the Settings button gesture.
+    setSpeechModelStatus('Requesting Chrome’s '+lang+' meeting speech model…');
     let installed;
-    try{installed=await SR.install({langs:[lang]});}
-    catch(error){throw new Error('Chrome could not install the '+lang+' speech model: '+(error.message||error));}
-    if(!installed)throw new Error('Chrome reported that the '+lang+' speech model could not be installed. Check your connection and try again.');
-    setSpeechModelStatus('Download completed. Verifying the '+lang+' model…');
+    try{installed=await SR.install({langs:[lang],quality:'conversation'});}
+    catch(error){throw new Error('Chrome could not start the '+lang+' meeting model installation: '+(error.message||error));}
+    if(!installed){
+      let availability='unknown';
+      try{availability=await SR.available(options);}catch(_){}
+      if(availability==='available'){
+        setSpeechModelStatus('Chrome already has the '+lang+' meeting model. Verifying…');
+      }else if(availability==='unavailable'){
+        throw new Error('Chrome reports that on-device '+lang+' conversation-quality speech recognition is unavailable on this device. This is not necessarily a connection problem. Try updating Chrome or choose another language.');
+      }else{
+        const online=navigator.onLine;
+        throw new Error('Chrome could not install the '+lang+' conversation-quality model (availability: '+availability+'). Check that Chrome is online'+(online?'':' — this extension currently detects no internet connection')+', has free disk space, and is not blocked by device/network policies. Then retry.');
+      }
+    }
+    setSpeechModelStatus('Installation request finished. Verifying the '+lang+' meeting model…');
     let verified;
     try{verified=await SR.available(options);}
-    catch(error){throw new Error('The model download finished, but Chrome could not verify it: '+(error.message||error));}
-    if(verified!=='available')throw new Error('Chrome did not confirm that the '+lang+' model is ready (status: '+verified+'). Please retry.');
-    setSpeechModelStatus('Installed and verified: '+lang+'. Local meeting transcription is ready.');
+    catch(error){throw new Error('Chrome could not verify the '+lang+' meeting model: '+(error.message||error));}
+    if(verified!=='available')throw new Error('Chrome does not report the '+lang+' conversation-quality model as installed (status: '+verified+'). Please retry or choose another language.');
+    setSpeechModelStatus('Installed and verified: '+lang+' (conversation quality). Local meeting transcription is ready.');
     return true;
   }
-  setSpeechModelStatus('Checking Chrome local speech model for '+lang+'…');
+  setSpeechModelStatus('Checking Chrome local meeting speech model for '+lang+'…');
   let availability;
   try{availability=await SR.available(options);}
   catch(error){throw new Error('Chrome could not check the local speech model: '+(error.message||error));}
   if(availability==='available')return true;
   if(availability==='unavailable'){
-    throw new Error('Chrome does not offer an on-device speech model for '+lang+'. For English choose English (US); for Hindi choose Hindi (India).');
+    throw new Error('Chrome does not offer an on-device conversation-quality speech model for '+lang+'. Try another language or update Chrome.');
   }
   throw new Error('The '+lang+' local speech model is not installed. Open Settings and click Install / check local speech model.');
 }
