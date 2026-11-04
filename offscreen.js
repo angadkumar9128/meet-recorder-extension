@@ -42,8 +42,8 @@ function launchAudioRecognition(){
   };
   recognition.onerror=event=>{
     if(!['no-speech','aborted'].includes(event.error)){
-      chrome.runtime.sendMessage({type:'AUDIO_TRANSCRIPTION_STATUS',sessionId,error:'Local audio transcription: '+event.error}).catch(()=>{});
-      if(['not-allowed','service-not-allowed','language-not-supported','audio-capture'].includes(event.error))speechEnabled=false;
+      speechEnabled=false;
+      chrome.runtime.sendMessage({type:'AUDIO_TRANSCRIPTION_STATUS',sessionId,error:'Local audio transcription stopped: '+event.error+'. Meet captions and recording can continue.'}).catch(()=>{});
     }
   };
   recognition.onend=()=>{
