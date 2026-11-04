@@ -17,11 +17,11 @@ async function stopRecording(){
   const state=await getState();if(!state.recording)return {ok:true};
   const elapsedMs=elapsedNow(state);const stopped={...state,recording:false,paused:false,elapsedMs,segmentStartedAt:null,finalizing:true};
   await setState(stopped);await chrome.action.setBadgeText({text:''});
+  await chrome.runtime.sendMessage({target:'offscreen',type:'STOP'}).catch(()=>{});
   let entries=[];try{const r=await chrome.tabs.sendMessage(state.tabId,{type:'STOP_TRANSCRIPT'});entries=r.entries||[];}catch{}
   const saved=await chrome.storage.local.get('transcript:'+state.sessionId);entries=entries.length?mergeWithAuxiliary(entries,saved['transcript:'+state.sessionId]||[]):(saved['transcript:'+state.sessionId]||[]);
   await saveSession(stopped,entries,'finalizing');
   await chrome.downloads.download({url:'data:text/plain;charset=utf-8,'+encodeURIComponent(transcriptText(entries,stopped,'txt')),filename:'MeetNotebook/'+state.stamp+'_'+state.code+'_transcript.txt',saveAs:false});
-  await chrome.runtime.sendMessage({target:'offscreen',type:'STOP'}).catch(()=>{});
   return {ok:true,elapsedMs};
 }
 async function deleteChunks(sessionId){return new Promise(resolve=>{const req=indexedDB.open('meet-notebook-media',2);req.onupgradeneeded=()=>{const db=req.result;if(!db.objectStoreNames.contains('chunks'))db.createObjectStore('chunks',{keyPath:['sessionId','index']});if(!db.objectStoreNames.contains('videos'))db.createObjectStore('videos',{keyPath:'sessionId'});};req.onerror=()=>resolve();req.onsuccess=()=>{const db=req.result;const tx=db.transaction(['chunks','videos'],'readwrite');const cursor=tx.objectStore('chunks').openCursor();cursor.onsuccess=()=>{const c=cursor.result;if(!c)return;if(c.value.sessionId===sessionId)c.delete();c.continue();};tx.objectStore('videos').delete(sessionId);tx.oncomplete=()=>{db.close();resolve();};tx.onerror=()=>{db.close();resolve();};};});}
