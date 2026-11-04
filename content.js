@@ -171,6 +171,20 @@
         continue;
       }
 
+      const recentEntry = entries[entries.length - 1];
+      if (recentEntry &&
+          recentEntry.speaker.toLowerCase() === speaker.toLowerCase() &&
+          now - (recentEntry.updatedAt || now) < 5000 &&
+          MeetNotebookTranscript.isRollingUpdate(recentEntry.text, text)) {
+        recentEntry.text = MeetNotebookTranscript.mergeRollingText(recentEntry.text, text);
+        recentEntry.updatedAt = now;
+        nodeEntries.set(block, { speaker, fingerprint: key, entry: recentEntry });
+        seenCaptionFingerprints.set(key, now);
+        scheduleCommit(recentEntry);
+        publish();
+        continue;
+      }
+
       const entry = { speaker, text, t: elapsed(), updatedAt: now, committed: false, source: 'meet' };
       entries.push(entry);
       nodeEntries.set(block, { speaker, fingerprint: key, entry });
