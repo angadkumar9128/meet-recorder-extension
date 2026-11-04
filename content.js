@@ -174,7 +174,7 @@
       const recentEntry = entries[entries.length - 1];
       if (recentEntry &&
           recentEntry.speaker.toLowerCase() === speaker.toLowerCase() &&
-          now - (recentEntry.updatedAt || now) < 5000 &&
+          now - (recentEntry.updatedAt || now) < 90000 &&
           MeetNotebookTranscript.isRollingUpdate(recentEntry.text, text)) {
         recentEntry.text = MeetNotebookTranscript.mergeRollingText(recentEntry.text, text);
         recentEntry.updatedAt = now;
