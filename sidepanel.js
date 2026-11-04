@@ -28,50 +28,53 @@ function setSpeechModelStatus(message,isError=false){
   if(output){output.textContent=message;output.dataset.state=isError?'error':'info';}
   if($('status'))$('status').textContent=message;
 }
-async function checkLocalSpeechModel(lang,install=false){
+async function checkLocalSpeechModel(lang,install=false,preferredQuality='conversation'){
   const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
   if(!SR||typeof SR.available!=='function'||typeof SR.install!=='function'){
     throw new Error('This Chrome installation does not expose local speech-model management. Update Chrome and reopen the extension.');
   }
-  // Meetings need the highest-complexity local pack: continuous speech,
-  // background noise and multiple primary speakers.
-  const options={langs:[lang],processLocally:true,quality:'conversation'};
-  if(install){
-    // Keep install() as the first asynchronous operation so the call remains
-    // directly associated with the Settings button gesture.
-    setSpeechModelStatus('Requesting Chrome’s '+lang+' meeting speech model…');
-    let installed;
-    try{installed=await SR.install({langs:[lang],quality:'conversation'});}
-    catch(error){throw new Error('Chrome could not start the '+lang+' meeting model installation: '+(error.message||error));}
-    if(!installed){
-      let availability='unknown';
-      try{availability=await SR.available(options);}catch(_){}
-      if(availability==='available'){
-        setSpeechModelStatus('Chrome already has the '+lang+' meeting model. Verifying…');
-      }else if(availability==='unavailable'){
-        throw new Error('Chrome reports that on-device '+lang+' conversation-quality speech recognition is unavailable on this device. This is not necessarily a connection problem. Try updating Chrome or choose another language.');
-      }else{
-        const online=navigator.onLine;
-        throw new Error('Chrome could not install the '+lang+' conversation-quality model (availability: '+availability+'). Check that Chrome is online'+(online?'':' — this extension currently detects no internet connection')+', has free disk space, and is not blocked by device/network policies. Then retry.');
-      }
+  // Try the most capable model first, then degrade gracefully for devices
+  // whose local model catalog only supports dictation or basic commands.
+  const qualities=['conversation','dictation','command'];
+  const ordered=[preferredQuality,...qualities].filter((q,i,a)=>qualities.includes(q)&&a.indexOf(q)===i);
+  const failures=[];
+  setSpeechModelStatus((install?'Checking and installing':'Checking')+' local '+lang+' speech model…');
+  for(const quality of ordered){
+    const options={langs:[lang],processLocally:true,quality};
+    let status;
+    try{status=await SR.available(options);}
+    catch(error){throw new Error('Chrome could not check '+lang+' ('+quality+') model availability: '+(error.message||error));}
+    if(status==='available'){
+      setSpeechModelStatus('Ready: '+lang+' ('+quality+' quality).');
+      return quality;
     }
-    setSpeechModelStatus('Installation request finished. Verifying the '+lang+' meeting model…');
-    let verified;
-    try{verified=await SR.available(options);}
-    catch(error){throw new Error('Chrome could not verify the '+lang+' meeting model: '+(error.message||error));}
-    if(verified!=='available')throw new Error('Chrome does not report the '+lang+' conversation-quality model as installed (status: '+verified+'). Please retry or choose another language.');
-    setSpeechModelStatus('Installed and verified: '+lang+' (conversation quality). Local meeting transcription is ready.');
-    return true;
+    if(!install)continue;
+    if(status==='unavailable'){
+      failures.push(quality+': unavailable');
+      continue;
+    }
+    // "downloadable" means this language/quality exists but is not installed;
+    // "downloading" means Chrome may already be fetching it.
+    setSpeechModelStatus('Installing '+lang+' ('+quality+' quality)…');
+    let installed=false;
+    try{installed=await SR.install({langs:[lang],quality});}
+    catch(error){failures.push(quality+': '+(error.message||error));continue;}
+    let verified='unknown';
+    try{verified=await SR.available(options);}catch(error){failures.push(quality+': verification failed — '+(error.message||error));continue;}
+    if(installed&&verified==='available'){
+      setSpeechModelStatus('Installed and verified: '+lang+' ('+quality+' quality).');
+      return quality;
+    }
+    if(verified==='available'){
+      setSpeechModelStatus('Ready: '+lang+' ('+quality+' quality).');
+      return quality;
+    }
+    failures.push(quality+': install returned '+installed+', status '+verified);
   }
-  setSpeechModelStatus('Checking Chrome local meeting speech model for '+lang+'…');
-  let availability;
-  try{availability=await SR.available(options);}
-  catch(error){throw new Error('Chrome could not check the local speech model: '+(error.message||error));}
-  if(availability==='available')return true;
-  if(availability==='unavailable'){
-    throw new Error('Chrome does not offer an on-device conversation-quality speech model for '+lang+'. Try another language or update Chrome.');
+  if(!install){
+    throw new Error('No installed local speech model was found for '+lang+'. Open Settings and click Install / check local speech model. The installer will test conversation, dictation and command quality.');
   }
-  throw new Error('The '+lang+' local speech model is not installed. Open Settings and click Install / check local speech model.');
+  throw new Error('Chrome could not provide an on-device model for '+lang+' at conversation, dictation or command quality. Results: '+failures.join(' | ')+'. This indicates a Chrome/device model availability issue, not just a language selection problem. Meet captions and recording can still work without local audio transcription.');
 }
 function openDb(){return new Promise((resolve,reject)=>{const r=indexedDB.open('meet-notebook-media',2);r.onupgradeneeded=()=>{const db=r.result;if(!db.objectStoreNames.contains('chunks'))db.createObjectStore('chunks',{keyPath:['sessionId','index']});if(!db.objectStoreNames.contains('videos'))db.createObjectStore('videos',{keyPath:'sessionId'});};r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});}
 async function readVideo(id){const db=await openDb();return new Promise((resolve,reject)=>{const tx=db.transaction('videos','readonly');const r=tx.objectStore('videos').get(id);r.onsuccess=()=>resolve(r.result?.blob||null);r.onerror=()=>reject(r.error);tx.oncomplete=()=>db.close();});}
@@ -79,8 +82,8 @@ async function playback(id){
   try{const blob=await readVideo(id);if(!blob)throw new Error('Playback file is not available in local storage for this meeting.');if(playerUrl)URL.revokeObjectURL(playerUrl);playerUrl=URL.createObjectURL(blob);$('player').src=playerUrl;$('playbackPanel').hidden=false;$('player').load();$('playbackPanel').scrollIntoView({behavior:'smooth',block:'nearest'});$('status').textContent='Recording ready. Use the video timeline to seek.';}catch(e){$('status').textContent=e.message;}
 }
 $('start').onclick=async()=>{
-  try{const tab=await activeMeet();const settings=await chrome.storage.local.get(['myName','quality','micGain','autoGain','enhanceMic','micDeviceId','audioTranscription','captionLanguage','hideMeetCaptions']);if(settings.audioTranscription!==false)await checkLocalSpeechModel(settings.captionLanguage||'en-US',false);const streamId=await chrome.tabCapture.getMediaStreamId({targetTabId:tab.id});
-    const r=await request('START',{tabId:tab.id,streamId,myName:settings.myName,quality:settings.quality||'high',micGain:settings.micGain??2,autoGain:settings.autoGain!==false,enhanceMic:settings.enhanceMic!==false,micDeviceId:settings.micDeviceId||null,hideMeetCaptions:settings.hideMeetCaptions!==false,audioTranscription:settings.audioTranscription!==false,speechLanguage:settings.captionLanguage||'en-US'});
+  try{const tab=await activeMeet();const settings=await chrome.storage.local.get(['myName','quality','micGain','autoGain','enhanceMic','micDeviceId','audioTranscription','captionLanguage','speechQuality','hideMeetCaptions']);const speechQuality=settings.audioTranscription!==false?await checkLocalSpeechModel(settings.captionLanguage||'en-US',false,settings.speechQuality||'conversation'):'command';const streamId=await chrome.tabCapture.getMediaStreamId({targetTabId:tab.id});
+    const r=await request('START',{tabId:tab.id,streamId,myName:settings.myName,quality:settings.quality||'high',micGain:settings.micGain??2,autoGain:settings.autoGain!==false,enhanceMic:settings.enhanceMic!==false,micDeviceId:settings.micDeviceId||null,hideMeetCaptions:settings.hideMeetCaptions!==false,audioTranscription:settings.audioTranscription!==false,speechLanguage:settings.captionLanguage||'en-US',speechQuality});
     sessionId=r.sessionId;await refresh();if(!r.micOk)$('status').textContent='Recording started, but microphone access was denied. Open Settings → Test microphone / grant access, then start a new recording.';else if(!r.transcriptOk)$('status').textContent='Recording started, but Meet captions could not be attached. Reload the Meet tab and try again.';
   }catch(e){$('status').textContent=e.message;}
 };
