@@ -63,6 +63,10 @@ The independent speech recognizer is explicitly configured for on-device process
 
 ## Release notes
 
+### 1.5.3 — Longer rolling-result continuity
+
+- Keeps the same local-ASR utterance linked across successive recognizer restarts by measuring the duplicate window from its most recent update, not its first result.
+
 ### 1.5.2 — Installer activation and ASR snapshot fixes
 
 - Calls Chrome's idempotent `SpeechRecognition.install({ langs: [language] })` directly from the Settings button click, then verifies the installed model with `available()`.
