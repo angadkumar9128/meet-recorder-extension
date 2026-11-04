@@ -66,9 +66,15 @@ chrome.runtime.onMessage.addListener((msg,sender,reply)=>{
       case 'NOTE_UPDATE':{
         const s=await getState();const id=msg.sessionId||s.sessionId;if(!id)throw new Error('No active meeting session.');
         const key='transcript:'+id;const d=await chrome.storage.local.get(key);const entries=d[key]||[];const entry={...(msg.entry||{}),source:msg.type==='NOTE_UPDATE'?'note':'local-asr'};
-        const normalized=normalizeSpeech(entry.text);const duplicate=entries.some(e=>Math.abs((e.t||0)-(entry.t||0))<=4&&normalizeSpeech(e.text)===normalized);
-        if(normalized&&!duplicate)entries.push(entry);
-        entries.sort((a,b)=>(a.t||0)-(b.t||0));await chrome.storage.local.set({[key]:entries});await saveSession({...s,sessionId:id},entries,s.recording?'recording':s.finalizing?'finalizing':'saved');reply({ok:true,duplicate});break;
+        const normalized=normalizeSpeech(entry.text);let duplicate=false,merged=false;
+        if(normalized&&msg.type==='LOCAL_TRANSCRIPT_UPDATE'){
+          const result=MeetNotebookTranscript.mergeRecentSpeechEntry(entries,entry,12);
+          duplicate=result.duplicate;merged=result.merged;
+        }else if(normalized){
+          duplicate=entries.some(e=>e.source==='note'&&Math.abs((e.t||0)-(entry.t||0))<=4&&normalizeSpeech(e.text)===normalized);
+          if(!duplicate)entries.push(entry);
+        }
+        entries.sort((a,b)=>(a.t||0)-(b.t||0));await chrome.storage.local.set({[key]:entries});await saveSession({...s,sessionId:id},entries,s.recording?'recording':s.finalizing?'finalizing':'saved');reply({ok:true,duplicate,merged});break;
       }
       case 'LIST_SESSIONS':{const d=await chrome.storage.local.get('sessions');reply({sessions:d.sessions||[]});break;}
       case 'DOWNLOAD_TRANSCRIPT':await downloadTranscript(msg.sessionId,msg.format||'txt');reply({ok:true});break;
