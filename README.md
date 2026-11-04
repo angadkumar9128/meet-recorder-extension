@@ -63,6 +63,13 @@ The independent speech recognizer is explicitly configured for on-device process
 
 ## Release notes
 
+### 1.5.4 — Meeting-quality local speech model installation
+
+- Requests Chrome's `conversation` quality language pack, designed for continuous speech and multiple primary speakers in meetings.
+- Checks the actual installed-model availability after installation and reports unsupported language/quality separately from a failed download.
+- Replaces the generic connection-only error with actionable diagnostics for network availability, disk space and device/network policy restrictions.
+
+
 ### 1.5.3 — Longer rolling-result continuity
 
 - Keeps the same local-ASR utterance linked across successive recognizer restarts by measuring the duplicate window from its most recent update, not its first result.
