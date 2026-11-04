@@ -33,7 +33,7 @@ chrome.runtime.onMessage.addListener((msg,sender,reply)=>{
         const old=await getState();if(old.recording)throw new Error('A recording is already active.');
         const tab=await chrome.tabs.get(msg.tabId);if(!tab.url||!tab.url.startsWith('https://meet.google.com/'))throw new Error('Open a Google Meet tab first.');
         await ensureOffscreen();const sessionId=crypto.randomUUID();const startedAt=Date.now();
-        const capture=await chrome.runtime.sendMessage({target:'offscreen',type:'START',streamId:msg.streamId,sessionId,quality:msg.quality||'high',micGain:msg.micGain||2,autoGain:msg.autoGain!==false,enhanceMic:msg.enhanceMic!==false,micDeviceId:msg.micDeviceId||null});
+        const capture=await chrome.runtime.sendMessage({target:'offscreen',type:'START',streamId:msg.streamId,sessionId,quality:msg.quality||'high',micGain:msg.micGain||2,autoGain:msg.autoGain!==false,enhanceMic:msg.enhanceMic!==false,micDeviceId:msg.micDeviceId||null,audioTranscription:msg.audioTranscription===true,speechLanguage:msg.speechLanguage||'en-US'});
         if(!capture||!capture.ok)throw new Error(capture&&capture.error||'Could not start recording.');
         let transcriptOk=true;try{await sendTab(tab.id,{type:'START_TRANSCRIPT',startedAt,sessionId,hideNativeCaptions:msg.hideMeetCaptions!==false});}catch{transcriptOk=false;}
         const state={recording:true,paused:false,tabId:tab.id,sessionId,startedAt,segmentStartedAt:Date.now(),elapsedMs:0,myName:msg.myName||'You',code:codeFrom(tab.url),stamp:stamp(startedAt),quality:msg.quality||'high'};
@@ -60,6 +60,7 @@ chrome.runtime.onMessage.addListener((msg,sender,reply)=>{
       }
       case 'ROSTER_UPDATE':{const d=await chrome.storage.local.get('sessions');const rows=d.sessions||[];const i=rows.findIndex(x=>x.id===msg.sessionId);if(i>=0){rows[i]={...rows[i],participants:msg.participants||[]};await chrome.storage.local.set({sessions:rows});}reply({ok:true});break;}
       case 'AUDIO_LEVELS':await chrome.storage.local.set({micAudioLevel:msg.mic||0,tabAudioLevel:msg.tab||0});reply({ok:true});break;
+      case 'AUDIO_TRANSCRIPTION_STATUS':{await chrome.storage.local.set({audioTranscriptionStatus:msg.error||'Local audio transcription is active.'});reply({ok:true});break;}
       case 'LOCAL_TRANSCRIPT_UPDATE':
       case 'NOTE_UPDATE':{
         const s=await getState();const id=msg.sessionId||s.sessionId;if(!id)throw new Error('No active meeting session.');
