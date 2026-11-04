@@ -13,7 +13,7 @@ function supportedMime(){const mp4='video/mp4;codecs=avc1.640028,mp4a.40.2';if(M
 function activeDuration(){return activeElapsedMs+(recorder&&recorder.state==='recording'&&segmentStartedAt?performance.now()-segmentStartedAt:0);}
 function audioTranscriptionStatus(message){chrome.runtime.sendMessage({type:'AUDIO_TRANSCRIPTION_STATUS',sessionId,error:message}).catch(()=>{});}
 function queueAudioTranscript(text,partial=false){
-  const clean=String(text||'').replace(/\\s+/g,' ').trim();if(!clean)return;
+  const clean=String(text||'').replace(/\s+/g,' ').trim();if(!clean)return;
   const entry={speaker:'Live Audio Transcript',text:clean,t:Math.floor(activeDuration()/1000),committed:true,source:'local-asr'};if(partial)entry.partial=true;
   speechSaveQueue=speechSaveQueue.then(()=>chrome.runtime.sendMessage({type:'LOCAL_TRANSCRIPT_UPDATE',sessionId,entry})).catch(error=>audioTranscriptionStatus('A transcript segment could not be saved: '+(error?.message||error)));
 }
@@ -32,7 +32,7 @@ function launchAudioRecognition(){
   const recognition=new SR();recognition.lang=speechLanguage;recognition.continuous=true;recognition.interimResults=true;recognition.maxAlternatives=1;recognition.processLocally=true;if('quality' in recognition)recognition.quality=speechQuality;
   let terminalError=false;
   recognition.onstart=()=>{speechRestartAttempts=0;audioTranscriptionStatus('Live audio transcription active · '+speechLanguage+' · '+speechQuality+' quality'+(speechQuality==='command'?' (limited for continuous meetings)':'')+'.');};
-  recognition.onresult=event=>{const interim=[];for(let i=event.resultIndex;i<event.results.length;i++){const result=event.results[i],text=String(result[0]?.transcript||'').replace(/\\s+/g,' ').trim();if(!text)continue;if(result.isFinal)queueAudioTranscript(text,false);else interim.push(text);}speechInterimText=interim.join(' ').trim();};
+  recognition.onresult=event=>{const interim=[];for(let i=event.resultIndex;i<event.results.length;i++){const result=event.results[i],text=String(result[0]?.transcript||'').replace(/\s+/g,' ').trim();if(!text)continue;if(result.isFinal)queueAudioTranscript(text,false);else interim.push(text);}speechInterimText=interim.join(' ').trim();};
   recognition.onerror=event=>{const error=String(event.error||'unknown');terminalError=['not-allowed','service-not-allowed','language-not-supported','bad-grammar'].includes(error);
     if(terminalError){speechFatalError=true;speechEnabled=false;audioTranscriptionStatus('Local audio transcription stopped: '+error+'. Check Chrome permissions and the installed language model. Recording and Meet captions can continue.');}
     else if(!['no-speech','aborted'].includes(error)){speechRestartAttempts++;audioTranscriptionStatus('Local transcription encountered '+error+'; attempting automatic recovery ('+speechRestartAttempts+').');}};
