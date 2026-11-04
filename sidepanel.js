@@ -120,10 +120,10 @@ $('installSpeechPack').onclick=async()=>{
   if(button.disabled)return;
   button.disabled=true;button.textContent='Checking / installing…';
   try{
-    await checkLocalSpeechModel(lang,true);
+    const speechQuality=await checkLocalSpeechModel(lang,true,'conversation');
     $('audioTranscription').checked=true;
-    await chrome.storage.local.set({audioTranscription:true,captionLanguage:lang});
-    setSpeechModelStatus('Installed and enabled: '+lang+'. Start your next recording to transcribe the full meeting audio locally.');
+    await chrome.storage.local.set({audioTranscription:true,captionLanguage:lang,speechQuality});
+    setSpeechModelStatus('Installed and enabled: '+lang+' ('+speechQuality+' quality). Start your next recording to transcribe meeting audio locally.');
   }catch(error){
     setSpeechModelStatus(error.message||String(error),true);
   }finally{
