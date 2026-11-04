@@ -2,7 +2,7 @@
 let recorder=null,tabStream=null,micStream=null,audioContext=null,sessionId=null,chunkIndex=0,chunkWrites=[],videoUrl=null;
 let levelTimer=null,micGainNode=null,micAnalyser=null,tabAnalyser=null,micData=null,tabData=null;
 let baseMicGain=2,autoGain=true,enhanceMic=true,activeElapsedMs=0,segmentStartedAt=0;
-let speechRecognizer=null,speechTrack=null,speechRestartTimer=null,speechEnabled=false,speechLanguage='en-US',speechQuality='command',speechPaused=false,speechSaveQueue=Promise.resolve();
+let speechRecognizer=null,speechTrack=null,speechRestartTimer=null,speechEnabled=false,speechLanguage='en-US',speechQuality='command',speechPaused=false,speechSaveQueue=Promise.resolve(),speechInterimText='',speechRestartAttempts=0,speechFatalError=false;
 const PRESETS={standard:{width:1280,height:720,bitrate:4000000},high:{width:1920,height:1080,bitrate:8000000},saver:{width:1280,height:720,bitrate:2000000}};
 function openDb(){return new Promise((resolve,reject)=>{const r=indexedDB.open('meet-notebook-media',2);r.onupgradeneeded=()=>{const db=r.result;if(!db.objectStoreNames.contains('chunks'))db.createObjectStore('chunks',{keyPath:['sessionId','index']});if(!db.objectStoreNames.contains('videos'))db.createObjectStore('videos',{keyPath:'sessionId'});};r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});}
 async function saveVideo(blob){const db=await openDb();return new Promise((resolve,reject)=>{const tx=db.transaction('videos','readwrite');tx.objectStore('videos').put({sessionId,blob,type:blob.type,savedAt:Date.now()});tx.oncomplete=()=>{db.close();resolve();};tx.onerror=()=>{db.close();reject(tx.error);};});}
@@ -11,56 +11,37 @@ async function readChunks(){const db=await openDb();return new Promise((resolve,
 async function clearChunks(){const db=await openDb();return new Promise((resolve,reject)=>{const tx=db.transaction('chunks','readwrite');const store=tx.objectStore('chunks');const cursor=store.openCursor();cursor.onsuccess=()=>{const c=cursor.result;if(!c)return;if(c.value.sessionId===sessionId)c.delete();c.continue();};tx.oncomplete=()=>{db.close();resolve();};tx.onerror=()=>{db.close();reject(tx.error);};});}
 function supportedMime(){const mp4='video/mp4;codecs=avc1.640028,mp4a.40.2';if(MediaRecorder.isTypeSupported(mp4))return mp4;const vp8='video/webm;codecs=vp8,opus';return MediaRecorder.isTypeSupported(vp8)?vp8:'video/webm';}
 function activeDuration(){return activeElapsedMs+(recorder&&recorder.state==='recording'&&segmentStartedAt?performance.now()-segmentStartedAt:0);}
+function audioTranscriptionStatus(message){chrome.runtime.sendMessage({type:'AUDIO_TRANSCRIPTION_STATUS',sessionId,error:message}).catch(()=>{});}
+function queueAudioTranscript(text,partial=false){
+  const clean=String(text||'').replace(/\\s+/g,' ').trim();if(!clean)return;
+  const entry={speaker:'Live Audio Transcript',text:clean,t:Math.floor(activeDuration()/1000),committed:true,source:'local-asr'};if(partial)entry.partial=true;
+  speechSaveQueue=speechSaveQueue.then(()=>chrome.runtime.sendMessage({type:'LOCAL_TRANSCRIPT_UPDATE',sessionId,entry})).catch(error=>audioTranscriptionStatus('A transcript segment could not be saved: '+(error?.message||error)));
+}
 async function stopAudioRecognition(final=false){
   speechPaused=true;clearTimeout(speechRestartTimer);speechRestartTimer=null;
-  if(speechRecognizer){
-    const current=speechRecognizer;
-    await new Promise(resolve=>{
-      const timeout=setTimeout(resolve,2500);
-      current.onend=()=>{clearTimeout(timeout);resolve();};
-      try{current.stop();}catch{clearTimeout(timeout);resolve();}
-    });
-    if(speechRecognizer===current)speechRecognizer=null;
-    current.onresult=null;current.onerror=null;current.onend=null;
-  }
-  speechPaused=!final;
-  if(final)speechTrack=null;
+  if(speechRecognizer){const current=speechRecognizer;await new Promise(resolve=>{const timeout=setTimeout(resolve,3500);current.onend=()=>{clearTimeout(timeout);resolve();};try{current.stop();}catch{clearTimeout(timeout);resolve();}});
+    if(speechRecognizer===current)speechRecognizer=null;current.onresult=null;current.onerror=null;current.onend=null;}
+  if(speechInterimText){queueAudioTranscript(speechInterimText,true);speechInterimText='';}
+  speechPaused=!final;if(final)speechTrack=null;
 }
 function launchAudioRecognition(){
   if(!speechEnabled||speechPaused||!speechTrack||!recorder||recorder.state!=='recording'||speechRecognizer)return;
+  if(speechTrack.readyState&&speechTrack.readyState!=='live'){audioTranscriptionStatus('Meeting audio track ended. Local transcription cannot continue; the recording may still be available.');speechEnabled=false;return;}
   const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
-  if(!SR){chrome.runtime.sendMessage({type:'AUDIO_TRANSCRIPTION_STATUS',sessionId,error:'Chrome on-device Speech Recognition is unavailable in this extension context.'}).catch(()=>{});return;}
-  const recognition=new SR();
-  recognition.lang=speechLanguage;recognition.continuous=true;recognition.interimResults=false;recognition.processLocally=true;if('quality' in recognition)recognition.quality=speechQuality;
-  recognition.onstart=()=>chrome.runtime.sendMessage({type:'AUDIO_TRANSCRIPTION_STATUS',sessionId,error:'Local audio transcription is running ('+speechLanguage+').'}).catch(()=>{});
-  recognition.onresult=event=>{
-    for(let i=event.resultIndex;i<event.results.length;i++){
-      const result=event.results[i];if(!result.isFinal)continue;
-      const text=String(result[0]?.transcript||'').replace(/\s+/g,' ').trim();if(!text)continue;
-      const entry={speaker:'Meeting audio (all speakers)',text,t:Math.floor(activeDuration()/1000),committed:true,source:'local-asr'};
-      speechSaveQueue=speechSaveQueue.then(()=>chrome.runtime.sendMessage({type:'LOCAL_TRANSCRIPT_UPDATE',sessionId,entry})).catch(()=>{});
-    }
-  };
-  recognition.onerror=event=>{
-    if(!['no-speech','aborted'].includes(event.error)){
-      speechEnabled=false;
-      chrome.runtime.sendMessage({type:'AUDIO_TRANSCRIPTION_STATUS',sessionId,error:'Local audio transcription stopped: '+event.error+'. Meet captions and recording can continue.'}).catch(()=>{});
-    }
-  };
-  recognition.onend=()=>{
-    if(speechRecognizer===recognition)speechRecognizer=null;
-    if(speechEnabled&&!speechPaused&&recorder&&recorder.state==='recording'&&speechTrack){
-      clearTimeout(speechRestartTimer);speechRestartTimer=setTimeout(launchAudioRecognition,1000);
-    }
-  };
+  if(!SR){audioTranscriptionStatus('Chrome on-device speech recognition is unavailable in this extension context.');speechEnabled=false;return;}
+  const recognition=new SR();recognition.lang=speechLanguage;recognition.continuous=true;recognition.interimResults=true;recognition.maxAlternatives=1;recognition.processLocally=true;if('quality' in recognition)recognition.quality=speechQuality;
+  let terminalError=false;
+  recognition.onstart=()=>{speechRestartAttempts=0;audioTranscriptionStatus('Live audio transcription active · '+speechLanguage+' · '+speechQuality+' quality'+(speechQuality==='command'?' (limited for continuous meetings)':'')+'.');};
+  recognition.onresult=event=>{const interim=[];for(let i=event.resultIndex;i<event.results.length;i++){const result=event.results[i],text=String(result[0]?.transcript||'').replace(/\\s+/g,' ').trim();if(!text)continue;if(result.isFinal)queueAudioTranscript(text,false);else interim.push(text);}speechInterimText=interim.join(' ').trim();};
+  recognition.onerror=event=>{const error=String(event.error||'unknown');terminalError=['not-allowed','service-not-allowed','language-not-supported','bad-grammar'].includes(error);
+    if(terminalError){speechFatalError=true;speechEnabled=false;audioTranscriptionStatus('Local audio transcription stopped: '+error+'. Check Chrome permissions and the installed language model. Recording and Meet captions can continue.');}
+    else if(!['no-speech','aborted'].includes(error)){speechRestartAttempts++;audioTranscriptionStatus('Local transcription encountered '+error+'; attempting automatic recovery ('+speechRestartAttempts+').');}};
+  recognition.onend=()=>{if(speechRecognizer===recognition)speechRecognizer=null;if(speechInterimText){queueAudioTranscript(speechInterimText,true);speechInterimText='';}
+    if(speechEnabled&&!speechPaused&&!speechFatalError&&recorder&&recorder.state==='recording'&&speechTrack){clearTimeout(speechRestartTimer);const delay=Math.min(8000,300*Math.pow(2,Math.min(speechRestartAttempts,4)));speechRestartTimer=setTimeout(launchAudioRecognition,delay);}};
   speechRecognizer=recognition;
-  try{recognition.start(speechTrack);}
-  catch(error){
-    speechRecognizer=null;speechEnabled=false;
-    chrome.runtime.sendMessage({type:'AUDIO_TRANSCRIPTION_STATUS',sessionId,error:'Could not start local audio transcription: '+(error.message||error)+'. Meet captions and recording can continue.'}).catch(()=>{});
-  }
+  try{recognition.start(speechTrack);}catch(error){speechRecognizer=null;speechRestartAttempts++;audioTranscriptionStatus('Local transcription could not start ('+(error.message||error)+'); automatic recovery will retry.');
+    if(speechEnabled&&!speechPaused){clearTimeout(speechRestartTimer);speechRestartTimer=setTimeout(launchAudioRecognition,Math.min(8000,500*Math.pow(2,Math.min(speechRestartAttempts,4))));}}
 }
-
 function clamp(v,min,max){return Math.max(min,Math.min(max,v));}
 function rms(analyser,data){if(!analyser||!data)return 0;analyser.getFloatTimeDomainData(data);let sum=0;for(let i=0;i<data.length;i++)sum+=data[i]*data[i];return Math.sqrt(sum/data.length);}
 function monitorLevels(){
@@ -108,7 +89,7 @@ async function repairWebm(input,durationMs){
 }
 async function start(msg){
   if(recorder&&recorder.state!=='inactive')throw new Error('Recorder is already active.');
-  sessionId=msg.sessionId;chunkIndex=0;chunkWrites=[];activeElapsedMs=0;segmentStartedAt=0;speechEnabled=msg.audioTranscription===true;speechLanguage=msg.speechLanguage||'en-US';speechQuality=['conversation','dictation','command'].includes(msg.speechQuality)?msg.speechQuality:'command';speechPaused=false;speechTrack=null;speechSaveQueue=Promise.resolve();
+  sessionId=msg.sessionId;chunkIndex=0;chunkWrites=[];activeElapsedMs=0;segmentStartedAt=0;speechEnabled=msg.audioTranscription===true;speechLanguage=msg.speechLanguage||'en-US';speechQuality=['conversation','dictation','command'].includes(msg.speechQuality)?msg.speechQuality:'command';speechPaused=false;speechTrack=null;speechSaveQueue=Promise.resolve();speechInterimText='';speechRestartAttempts=0;speechFatalError=false;
   baseMicGain=clamp(Number(msg.micGain)||2,.5,5);autoGain=msg.autoGain!==false;enhanceMic=msg.enhanceMic!==false;
   const preset=PRESETS[msg.quality]||PRESETS.high;
   tabStream=await navigator.mediaDevices.getUserMedia({audio:{mandatory:{chromeMediaSource:'tab',chromeMediaSourceId:msg.streamId}},video:{mandatory:{chromeMediaSource:'tab',chromeMediaSourceId:msg.streamId}}});
@@ -145,7 +126,7 @@ async function start(msg){
 function cleanup(){stopAudioRecognition(true);speechEnabled=false;clearInterval(levelTimer);levelTimer=null;[tabStream,micStream].filter(Boolean).forEach(s=>s.getTracks().forEach(t=>t.stop()));tabStream=null;micStream=null;audioContext?.close();audioContext=null;recorder=null;micGainNode=null;micAnalyser=null;tabAnalyser=null;micData=null;tabData=null;sessionId=null;chunkWrites=[];segmentStartedAt=0;chrome.runtime.sendMessage({type:'AUDIO_LEVELS',mic:0,tab:0}).catch(()=>{});}
 chrome.runtime.onMessage.addListener((msg,_sender,reply)=>{if(msg.target!=='offscreen')return;(async()=>{try{
   if(msg.type==='START')reply(await start(msg));
-  else if(msg.type==='STOP'){speechEnabled=false;await stopAudioRecognition(true);await speechSaveQueue;if(recorder&&recorder.state!=='inactive'){if(recorder.state==='recording'&&segmentStartedAt)activeElapsedMs+=performance.now()-segmentStartedAt;segmentStartedAt=0;recorder.stop();}reply({ok:true});}
+  else if(msg.type==='STOP'){speechEnabled=false;speechFatalError=true;await stopAudioRecognition(true);await speechSaveQueue;if(recorder&&recorder.state!=='inactive'){if(recorder.state==='recording'&&segmentStartedAt)activeElapsedMs+=performance.now()-segmentStartedAt;segmentStartedAt=0;recorder.stop();}reply({ok:true});}
   else if(msg.type==='PAUSE'){if(recorder&&recorder.state==='recording'){if(segmentStartedAt)activeElapsedMs+=performance.now()-segmentStartedAt;segmentStartedAt=0;await stopAudioRecognition(false);await speechSaveQueue;recorder.pause();}reply({ok:true});}
   else if(msg.type==='RESUME'){if(recorder&&recorder.state==='paused'){recorder.resume();segmentStartedAt=performance.now();speechPaused=false;launchAudioRecognition();}reply({ok:true});}
   else if(msg.type==='REVOKE_URL'){if(msg.url)URL.revokeObjectURL(msg.url);reply({ok:true});}

@@ -6,7 +6,7 @@ const pad=n=>String(n).padStart(2,'0');
 const stamp=ms=>{const d=new Date(ms);return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate())+'_'+pad(d.getHours())+'-'+pad(d.getMinutes());};
 const codeFrom=url=>{try{return new URL(url).pathname.split('/').filter(Boolean).join('')||'meet';}catch{return 'meet';}};
 function elapsedNow(s){return Math.max(0,(s.elapsedMs||0)+(s.recording&&!s.paused&&s.segmentStartedAt?Date.now()-s.segmentStartedAt:0));}
-function mergeWithAuxiliary(meetEntries,storedEntries){const auxiliary=(storedEntries||[]).filter(e=>e.source==='local-asr'||e.source==='note');const meet=(meetEntries||[]).map(e=>({...e,source:'meet'}));return [...meet,...auxiliary].sort((a,b)=>(a.t||0)-(b.t||0));}
+function mergeWithAuxiliary(meetEntries,storedEntries){const meet=(meetEntries||[]).map(e=>({...e,source:'meet'}));const auxiliary=(storedEntries||[]).filter(e=>{if(e.source==='note')return true;if(e.source!=='local-asr')return false;const normalized=normalizeSpeech(e.text);return !meet.some(m=>normalized&&normalizeSpeech(m.text)===normalized&&Math.abs((m.t||0)-(e.t||0))<=8);});return [...meet,...auxiliary].sort((a,b)=>(a.t||0)-(b.t||0));}
 function normalizeSpeech(s){return String(s||'').toLocaleLowerCase().normalize('NFKC').replace(/[^\p{L}\p{N}\s]/gu,'').replace(/\s+/g,' ').trim();}
 async function ensureOffscreen(){const list=await chrome.runtime.getContexts({contextTypes:['OFFSCREEN_DOCUMENT']});if(!list.length)await chrome.offscreen.createDocument({url:'offscreen.html',reasons:['USER_MEDIA','BLOBS'],justification:'Capture, enhance and locally persist meeting media.'});}
 async function sendTab(tabId,message){try{return await chrome.tabs.sendMessage(tabId,message);}catch{await chrome.scripting.executeScript({target:{tabId},files:['lib/transcript.js','content.js']});return chrome.tabs.sendMessage(tabId,message);}}
@@ -68,8 +68,9 @@ chrome.runtime.onMessage.addListener((msg,sender,reply)=>{
         const key='transcript:'+id;const d=await chrome.storage.local.get(key);const entries=d[key]||[];const entry={...(msg.entry||{}),source:msg.type==='NOTE_UPDATE'?'note':'local-asr'};
         const normalized=normalizeSpeech(entry.text);let duplicate=false,merged=false;
         if(normalized&&msg.type==='LOCAL_TRANSCRIPT_UPDATE'){
-          const result=MeetNotebookTranscript.mergeRecentSpeechEntry(entries,entry,12);
-          duplicate=result.duplicate;merged=result.merged;
+          const duplicateOfMeet=entries.some(e=>e.source==='meet'&&normalizeSpeech(e.text)===normalized&&Math.abs((e.t||0)-(entry.t||0))<=8);
+          if(duplicateOfMeet){duplicate=true;}
+          else{const result=MeetNotebookTranscript.mergeRecentSpeechEntry(entries,entry,12);duplicate=result.duplicate;merged=result.merged;}
         }else if(normalized){
           duplicate=entries.some(e=>e.source==='note'&&Math.abs((e.t||0)-(entry.t||0))<=4&&normalizeSpeech(e.text)===normalized);
           if(!duplicate)entries.push(entry);

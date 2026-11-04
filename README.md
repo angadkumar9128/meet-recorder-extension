@@ -21,9 +21,9 @@ Meet Notebook now uses two complementary sources:
 1. **Google Meet captions** — captures Meet's speaker-labelled captions and keeps participant names attached to those caption segments.
 2. **Independent on-device audio transcription** — Chrome's local Speech Recognition engine listens to the mixed meeting audio track captured by the extension. This is a second recognition pass intended to recover words that Meet captions omit or misrecognize.
 
-The audio backup is labelled **Meeting audio (all speakers)**. Because Chrome receives one mixed audio track, it cannot reliably identify which participant spoke each word. It is intentionally kept separate from Meet's speaker-attributed captions rather than inventing speaker identities.
+The independent audio transcript is labelled **Live Audio Transcript**. Because Chrome receives one mixed audio track, it cannot reliably identify which participant spoke each word. It is intentionally kept separate from Meet's speaker-attributed captions rather than inventing speaker identities.
 
-The local recognizer runs with `processLocally = true`. The installer probes `conversation`, `dictation`, then `command` quality and installs the highest quality available for the selected language and device. The selected language/quality pack is downloaded once through Chrome's on-device speech recognition API and reused for later meetings. Quality availability depends on the Chrome build, platform and device. Lower quality levels may be less suitable for overlapping multi-speaker meetings.
+The local recognizer runs with `processLocally = true` and requests the installed quality tier. The installer probes `conversation`, `dictation`, then `command` and installs the highest tier Chrome reports for the selected language and device. `command` is a basic short-phrase tier, not a meeting-grade fallback; `dictation` supports continuous single-primary-speaker speech; `conversation` is the tier intended for multi-speaker meetings. If a device only supports `command`, the feature remains available but must be treated as best-effort. Quality availability depends on the Chrome build, platform, feature flags and device. See https://developer.mozilla.org/en-US/docs/Web/API/SpeechRecognition/install_static.
 
 ## Accuracy and limitations
 
@@ -32,10 +32,12 @@ This dual-source design should capture more spoken content than Meet captions al
 - Keep the Meet tab open and ensure the tab audio meter shows activity.
 - Keep the correct language selected in both Meet captions and Meet Notebook.
 - Use a clear microphone and avoid playing meeting audio through loudspeakers near an open microphone.
-- The independent audio transcript covers the mixed meeting audio, including remote participants and the local participant when their voice is present in the captured mix.
+- The independent audio transcript covers the combined audio track delivered by the Meet tab and the selected microphone input.
 - Meet captions remain the source for speaker names. The local audio backup does not have reliable per-person diarization.
 - When the local model is unavailable or local transcription is disabled, Meet captions continue as the fallback.
-- Overlapping speakers, interruptions, uncommon names, technical terms and language switching can still produce errors. Since the two recognizers are independent, the same phrase may occasionally appear in both sources; the source labels make this visible rather than silently deleting potentially useful words. Zero missed words cannot be guaranteed.
+- The recognizer requests interim results and saves the last unfinished phrase as a marked partial segment when a recognition session ends. It automatically restarts with a short delay and exponential backoff after recoverable errors.
+- Duplicate suppression is conservative: exact duplicates, long exact rolling prefixes and substantial word-boundary overlaps are merged; ambiguous sentences with merely similar openings are kept to avoid silently deleting legitimate speech. Exact cross-source duplicates are suppressed when a nearby Meet caption already contains the same words.
+- Overlapping speakers, interruptions, uncommon names, technical terms, language switching, Chrome model limits and recognizer restart boundaries can still cause omissions or errors. Partial recovered segments may be incomplete. Zero missed words cannot be guaranteed.
 
 ## Recording
 
@@ -62,6 +64,15 @@ node --test
 The independent speech recognizer is explicitly configured for on-device processing. The extension does not send meeting audio or transcripts to an external transcription API or server. Google Meet captions are still supplied by Google Meet itself. Recordings and transcripts are stored in the local browser profile. Inform participants before recording.
 
 ## Release notes
+
+### 1.5.6 — Resilient local transcription and conservative deduplication
+
+- Renames the independent audio source to **Live Audio Transcript** throughout the UI and documentation.
+- Saves the latest interim phrase as a marked partial segment when a recognizer session ends, reducing loss at restart boundaries.
+- Restarts after recoverable recognition errors using bounded exponential backoff; terminal permission/language errors stop with an actionable status.
+- Reduces restart gaps and reports the actual quality tier, explicitly warning when only command quality is available.
+- Reworks local-ASR deduplication to merge strong exact rolling evidence while preserving ambiguous sentences; suppresses exact nearby Meet/audio duplicates.
+- Fixes the saved Meet-caption visibility setting not being loaded correctly in Settings.
 
 ### 1.5.5 — Adaptive on-device speech model quality
 

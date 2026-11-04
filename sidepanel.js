@@ -14,8 +14,8 @@ function renderState(){
 function render(){
   const root=$('transcript'),q=$('search').value.trim().toLowerCase();root.replaceChildren();
   const rows=entries.filter(e=>!q||(e.speaker+' '+e.text).toLowerCase().includes(q));
-  if(!rows.length){const p=document.createElement('p');p.className='empty';p.textContent='No matching captions yet.';root.append(p);return;}
-  for(const entry of rows){const card=document.createElement('article');card.className='turn'+(entry.committed?'':' current')+(entry.source==='local-asr'?' audio-backup':'');const head=document.createElement('div');head.className='turnhead';const avatar=document.createElement('span');avatar.className='avatar';avatar.textContent=entry.speaker.split(/\s+/).map(x=>x[0]).slice(0,2).join('').toUpperCase();const name=document.createElement('span');name.className='speaker';name.textContent=entry.speaker;const time=document.createElement('span');time.className='time';time.textContent=fmt((entry.t||0)*1000);head.append(avatar,name,time);const p=document.createElement('p');p.textContent=entry.text;card.append(head,p);root.append(card);}
+  if(!rows.length){const p=document.createElement('p');p.className='empty';p.textContent='No transcript entries yet.';root.append(p);return;}
+  for(const entry of rows){const card=document.createElement('article');card.className='turn'+(entry.committed?'':' current')+(entry.source==='local-asr'?' audio-backup':'')+(entry.partial?' partial':'');const head=document.createElement('div');head.className='turnhead';const avatar=document.createElement('span');avatar.className='avatar';avatar.textContent=entry.speaker.split(/\s+/).map(x=>x[0]).slice(0,2).join('').toUpperCase();const name=document.createElement('span');name.className='speaker';name.textContent=entry.speaker;const time=document.createElement('span');time.className='time';time.textContent=fmt((entry.t||0)*1000)+(entry.partial?' · recovered partial':'');head.append(avatar,name,time);const p=document.createElement('p');p.textContent=entry.text;card.append(head,p);root.append(card);}
   if(scrollLatest)root.scrollTop=root.scrollHeight;
 }
 async function refresh(){
@@ -45,7 +45,7 @@ async function checkLocalSpeechModel(lang,install=false,preferredQuality='conver
     try{status=await SR.available(options);}
     catch(error){throw new Error('Chrome could not check '+lang+' ('+quality+') model availability: '+(error.message||error));}
     if(status==='available'){
-      setSpeechModelStatus('Ready: '+lang+' ('+quality+' quality).');
+      setSpeechModelStatus(quality==='command'?'Basic local model ready: '+lang+' (command quality). This tier is limited for continuous meeting transcription.':'Ready: '+lang+' ('+quality+' quality).');
       return quality;
     }
     if(!install)continue;
@@ -62,11 +62,11 @@ async function checkLocalSpeechModel(lang,install=false,preferredQuality='conver
     let verified='unknown';
     try{verified=await SR.available(options);}catch(error){failures.push(quality+': verification failed — '+(error.message||error));continue;}
     if(installed&&verified==='available'){
-      setSpeechModelStatus('Installed and verified: '+lang+' ('+quality+' quality).');
+      setSpeechModelStatus(quality==='command'?'Installed: '+lang+' (command quality). This is the basic tier and may miss continuous meeting speech.':'Installed and verified: '+lang+' ('+quality+' quality).');
       return quality;
     }
     if(verified==='available'){
-      setSpeechModelStatus('Ready: '+lang+' ('+quality+' quality).');
+      setSpeechModelStatus(quality==='command'?'Basic local model ready: '+lang+' (command quality). This tier is limited for continuous meeting transcription.':'Ready: '+lang+' ('+quality+' quality).');
       return quality;
     }
     failures.push(quality+': install returned '+installed+', status '+verified);
@@ -110,7 +110,7 @@ async function loadSessions(){
   }
 }
 async function settings(){
-  const s=await chrome.storage.local.get(['myName','quality','theme','micGain','autoGain','enhanceMic','audioTranscription','captionLanguage']);
+  const s=await chrome.storage.local.get(['myName','quality','theme','micGain','autoGain','enhanceMic','audioTranscription','captionLanguage','hideMeetCaptions']);
   $('myName').value=s.myName||'';$('quality').value=s.quality||'high';$('theme').value=s.theme||'system';$('micGain').value=s.micGain??2;$('gainValue').textContent=(Number($('micGain').value)).toFixed(1)+'×';$('autoGain').checked=s.autoGain!==false;$('enhanceMic').checked=s.enhanceMic!==false;$('audioTranscription').checked=s.audioTranscription!==false;$('captionLanguage').value=s.captionLanguage||'en-US';$('hideMeetCaptions').checked=s.hideMeetCaptions!==false;document.body.dataset.theme=s.theme==='system'?'':s.theme;
 }
 $('micGain').oninput=()=>$('gainValue').textContent=Number($('micGain').value).toFixed(1)+'×';
@@ -123,7 +123,7 @@ $('installSpeechPack').onclick=async()=>{
     const speechQuality=await checkLocalSpeechModel(lang,true,'conversation');
     $('audioTranscription').checked=true;
     await chrome.storage.local.set({audioTranscription:true,captionLanguage:lang,speechQuality});
-    setSpeechModelStatus('Installed and enabled: '+lang+' ('+speechQuality+' quality). Start your next recording to transcribe meeting audio locally.');
+    setSpeechModelStatus(speechQuality==='command'?'Installed and enabled: '+lang+' (command quality). This is the basic model tier and is not optimized for continuous meetings. Start a recording to use it, but expect lower capture quality.':'Installed and enabled: '+lang+' ('+speechQuality+' quality). Start your next recording to transcribe meeting audio locally.');
   }catch(error){
     setSpeechModelStatus(error.message||String(error),true);
   }finally{
