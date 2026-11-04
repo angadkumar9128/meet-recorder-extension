@@ -1,40 +1,50 @@
 # Meet Notebook
 
-A portable, local-first Chrome Manifest V3 extension for Google Meet recording and speaker-labelled live caption notes.
+A local-first Chrome Manifest V3 extension for recording Google Meet and producing a more complete meeting transcript.
 
 ## Install
 
 1. Download or clone this repository.
-2. Open `chrome://extensions` and enable Developer mode.
-3. Click **Load unpacked** and select this folder.
-4. Open Google Meet, enable captions in the correct language and start recording.
-5. Tell every participant before recording and comply with local law and organizational rules.
+2. Use **Chrome 139 or newer**.
+3. Open `chrome://extensions` and enable Developer mode.
+4. Click **Load unpacked** and select this folder.
+5. Open Google Meet, select the spoken language in Meet captions and Meet Notebook, then start recording.
+6. On the first use, open Meet Notebook **Settings** and click **Install / check local speech model**. Chrome downloads the selected language pack once. Wait until installation completes before starting a meeting.
+7. Tell every participant before recording and comply with local law and organizational rules.
 
-**No Python, FFmpeg, API key, local server, model download or external account is required.** The extension uses Google Meet captions and stores recordings and notes in the browser.
+No Python, FFmpeg, API key, local server, external account or cloud transcription service is required. The one-time Chrome language-model download is required for independent local audio transcription. If you disable this feature, the extension falls back to Google Meet captions only.
 
-## Transcription and speaker attribution
+## Two-source transcription
 
-- Remote participants' speaker-labelled text comes from Google Meet captions.
-- The observer processes visible caption cards, tracks rolling updates, handles speaker switches and deduplicates repeated DOM mutations.
-- It reattaches when Meet rebuilds the caption interface.
-- Transcript snapshots are saved periodically and after caption changes.
-- Optional Chrome on-device dictation can separately capture the user's own microphone voice when supported. It is disabled by default, may require a Chrome language pack, and does not transcribe remote participants.
+Meet Notebook now uses two complementary sources:
+
+1. **Google Meet captions** — captures Meet's speaker-labelled captions and keeps participant names attached to those caption segments.
+2. **Independent on-device audio transcription** — Chrome's local Speech Recognition engine listens to the mixed meeting audio track captured by the extension. This is a second recognition pass intended to recover words that Meet captions omit or misrecognize.
+
+The audio backup is labelled **Meeting audio (all speakers)**. Because Chrome receives one mixed audio track, it cannot reliably identify which participant spoke each word. It is intentionally kept separate from Meet's speaker-attributed captions rather than inventing speaker identities.
+
+The local recognizer runs with `processLocally = true`. The selected language pack is downloaded once through Chrome's on-device speech recognition API and reused for later meetings. Language availability depends on the Chrome build and platform. If Chrome reports that a language is unavailable, choose another supported language in Settings.
+
+## Accuracy and limitations
+
+This dual-source design should capture more spoken content than Meet captions alone, but it cannot guarantee a complete or word-perfect transcript. Recognition quality still depends on language/model availability, microphone and speaker volume, echo, background noise, overlapping speech and audio quality.
+
+- Keep the Meet tab open and ensure the tab audio meter shows activity.
+- Keep the correct language selected in both Meet captions and Meet Notebook.
+- Use a clear microphone and avoid playing meeting audio through loudspeakers near an open microphone.
+- The independent audio transcript covers the mixed meeting audio, including remote participants and the local participant when their voice is present in the captured mix.
+- Meet captions remain the source for speaker names. The local audio backup does not have reliable per-person diarization.
+- When the local model is unavailable or local transcription is disabled, Meet captions continue as the fallback.
+- Overlapping speakers, interruptions, uncommon names, technical terms and language switching can still produce errors. Zero missed words cannot be guaranteed.
 
 ## Recording
 
-- Tab audio plus optional microphone capture.
+- Captures Google Meet tab audio and optional microphone audio.
 - 48 kHz Web Audio mixing, microphone gain controls, voice filtering/compression and a final limiter.
 - MP4 H.264/AAC when supported, otherwise VP8/Opus WebM.
 - One-second media chunks are written to IndexedDB while recording.
 - Finalized video is retained locally for playback and seeking.
-
-## Important limitations
-
-This portable build does not run its own independent ASR or diarization model. It cannot correct words Google Meet fails to recognize or recover speech for which Meet produces no caption. Accuracy depends on Meet's language support, audio quality, microphone placement, network conditions and the caption service.
-
-Speaker names come from Meet's caption interface. Overlapping speech, interruptions, similar voices and caption delays can still cause errors. Chrome tab capture does not provide separate participant audio tracks. Zero missed words cannot be guaranteed, including during long monologues.
-
-For long meetings, keep the Meet tab open, keep captions enabled and prevent the computer from sleeping. Periodic local persistence reduces loss, but browser crashes, forced shutdowns, storage exhaustion or Meet caption outages can still interrupt capture.
+- Pausing the recording also pauses the local audio recognizer; it resumes with the recording.
 
 ## Verification
 
@@ -49,18 +59,28 @@ node --test
 
 ## Privacy
 
-Recording and transcript data remain in the local browser profile. No meeting audio or transcript is sent to an external service by this extension. Inform participants before recording.
+The independent speech recognizer is explicitly configured for on-device processing. The extension does not send meeting audio or transcripts to an external transcription API or server. Google Meet captions are still supplied by Google Meet itself. Recordings and transcripts are stored in the local browser profile. Inform participants before recording.
 
-### Live caption reliability improvements (1.4.2)
+## Release notes
 
-- Live caption snapshots are published on a steady short interval so continuous speech does not keep resetting a debounce timer.
-- Caption updates are merged per caption card rather than merging every consecutive phrase from the same speaker.
-- Recreated caption cards are checked for rolling-text overlap to reduce repeated partial sentences.
-- Rolling corrections replace the changed tail instead of duplicating the earlier words.
-- The extension still uses Google Meet captions as its speaker-labelled source; recognition accuracy is therefore bounded by Meet's caption engine and selected caption language.
+### 1.5.0 — Independent local audio transcription
 
-### Cumulative caption snapshot fix (1.4.3)
+- Added a second transcription source using Chrome's on-device Speech Recognition API.
+- Feeds the mixed meeting audio track to local recognition, rather than only listening to the user's microphone.
+- Keeps Meet's speaker-labelled captions and local audio-backup text as separate sources.
+- Adds a one-time language-pack installation step in Settings.
+- Adds a language selector for the local audio recognizer.
+- Requires Chrome 139 or newer for local processing and audio-track recognition.
+- No API key, local server, Python, FFmpeg or external transcription service is required.
+
+### 1.4.3 — Cumulative caption snapshot fix
 
 - Detects long rolling caption snapshots even when Google Meet rebuilds its caption DOM card.
 - Replaces revised caption tails instead of appending a near-complete repeated sentence.
 - Keeps the active same-speaker rolling caption associated for up to 90 seconds while it continues updating.
+
+### 1.4.2 — Live caption reliability improvements
+
+- Publishes live caption snapshots on a steady short interval.
+- Merges updates per caption card and deduplicates repeated DOM mutations.
+- Replaces corrected rolling tails instead of duplicating earlier words.
