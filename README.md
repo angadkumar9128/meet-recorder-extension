@@ -112,6 +112,23 @@ No Python, FFmpeg, API key, local server, external account, or paid transcriptio
 
 > **Important:** The one-time Chrome language-model installation is required for independent local audio transcription. Recording and Meet-caption capture can still be used when local transcription is unavailable or disabled.
 
+## Permissions explained
+
+The extension requests the following Chrome permissions to support its recording and notebook workflow:
+
+| Permission | Why it is needed |
+|---|---|
+| `tabCapture` | Captures audio from the active Google Meet tab after you start a recording. |
+| `offscreen` | Runs media capture, audio processing, and recording work outside the service worker. |
+| `downloads` | Saves transcript exports and the finalized transcript file to your Downloads location. |
+| `activeTab` | Accesses the tab you explicitly interact with when starting a recording. |
+| `storage` | Stores extension settings and recording/session state. |
+| `scripting` | Injects the caption-capture content script when it needs to be re-established in a Meet tab. |
+| `sidePanel` | Displays the Meet Notebook interface in Chrome's side panel. |
+| `unlimitedStorage` | Allows larger locally stored meeting data within browser storage limits. |
+
+The host permission is restricted to `https://meet.google.com/*`; the extension does not request general access to every website.
+
 ## Install and get started
 
 ### Load the extension
@@ -124,7 +141,7 @@ No Python, FFmpeg, API key, local server, external account, or paid transcriptio
 3. Enable **Developer mode**.
 4. Select **Load unpacked**.
 5. Choose the repository folder containing `manifest.json`.
-6. Pin or open **Meet Notebook** from the Chrome toolbar.
+6. Pin or open **Meet Notebook** from the Chrome toolbar. You can also use **Alt+Shift+N** (the default `open-notebook` shortcut; customize it at `chrome://extensions/shortcuts`).
 
 ### Prepare local transcription (recommended)
 
@@ -163,7 +180,7 @@ Use Past meetings to browse locally saved sessions. Transcript export controls s
 - **MD** — Markdown meeting notes.
 - **JSON** — structured transcript data.
 
-The exact content of an export depends on the data captured in that session. Review exported material before sharing it.
+The exact content of an export depends on the data captured in that session. Review exported material before sharing it. Exports are generated as local downloads; the extension does not upload them to a meeting-notes service.
 
 ### Microphone setup
 
@@ -241,7 +258,8 @@ Meet Notebook is designed for local-first use:
 
 - The independent speech recognizer is explicitly configured for on-device processing.
 - Meeting audio and transcripts are not sent to an external transcription API or server by this extension.
-- Recordings and transcript/session data are stored in the local browser profile using browser storage facilities such as IndexedDB and extension storage.
+- Audio chunks and finalized recording media are stored in the browser's IndexedDB database (`meet-notebook-media`); meeting sessions/transcripts and extension settings use Chrome extension storage.
+- Transcript export files are created through Chrome's Downloads API when you request an export or stop a recording.
 - Google Meet captions are still provided by Google Meet itself; their availability and processing are subject to Google's service.
 - Installing a Chrome speech model requires Chrome to obtain the relevant language resources. This is separate from sending each meeting's audio to a transcription service.
 
@@ -275,6 +293,7 @@ node --check offscreen.js
 node --check sidepanel.js
 node --check setup.js
 node --test
+python -c "import json; json.load(open('manifest.json', encoding='utf-8'))"
 ```
 
 The test suite covers rolling Meet-caption updates, corrected caption tails, speaker-turn formatting, cumulative local-ASR snapshots, duplicate suppression, and protection against merging genuine repeated phrases.
