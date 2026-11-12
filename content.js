@@ -1,5 +1,5 @@
 (() => {
-  const INSTANCE_TOKEN='meet-notebook-content-v1.7.5';
+  const INSTANCE_TOKEN='meet-notebook-content-v1.7.6';
   if(window.__meetNotebookLoaded===INSTANCE_TOKEN)return;
   window.__meetNotebookLoaded=INSTANCE_TOKEN;
   try{if(typeof chrome==='undefined'||!chrome.runtime||!chrome.runtime.id)return;}catch(_){return;}
@@ -19,8 +19,8 @@
   const elapsed=()=>Math.max(0,Math.floor((elapsedBeforePause+(activeSegmentStart?performance.now()-activeSegmentStart:0))/1000));
   function sendRuntimeMessage(message){try{if(typeof chrome==='undefined'||!chrome.runtime||!chrome.runtime.id)return Promise.resolve(null);return chrome.runtime.sendMessage(message).catch(()=>null);}catch(_){return Promise.resolve(null);}}
   function region(){
-    // Meet can keep an empty/hidden captions region in the DOM while rendering
-    // the active captions in a second region. Never trust the first match.
+    // Meet can retain empty, hidden, or stale caption regions. Enumerate all
+    // candidates and prefer the one with rendered speaker-labelled cards.
     const candidates=new Set();
     for(const selector of SELECTORS.regions){
       document.querySelectorAll(selector).forEach(el=>{
@@ -31,16 +31,30 @@
       });
     }
     if(!candidates.size)return null;
+    const isRendered=el=>{
+      // Do not test opacity: Meet Notebook may deliberately set the selected
+      // captions region to opacity:0 while continuing to observe its DOM.
+      for(let node=el;node&&node!==document.documentElement;node=node.parentElement){
+        if(node.hidden||node.getAttribute?.('aria-hidden')==='true')return false;
+        const style=getComputedStyle(node);
+        if(style.display==='none'||style.visibility==='hidden'||style.contentVisibility==='hidden')return false;
+      }
+      return !el.getClientRects||el.getClientRects().length>0;
+    };
     const score=el=>{
-      const cards=el.querySelectorAll('.nMcdL').length;
-      const paired=el.querySelectorAll('.nMcdL .NWpY1d').length+
-        el.querySelectorAll('.nMcdL .ygicle').length;
+      if(!isRendered(el))return -1;
+      const cards=[...el.querySelectorAll('.nMcdL')].filter(isRendered);
+      const pairedCards=cards.filter(card=>card.querySelector('.NWpY1d')&&card.querySelector('.ygicle')).length;
       const metadata=el.querySelectorAll('[data-caption-id],[data-message-id],[data-speaker-id]').length;
       const avatars=el.querySelectorAll('img,[role="img"]').length;
       const label=((el.getAttribute('aria-label')||'').toLowerCase().includes('caption'))?2:0;
-      return cards*100+paired*10+metadata*5+Math.min(avatars,5)+label;
+      // A rendered card with both a speaker and utterance is stronger evidence
+      // than a stale card count or an aria-label on an otherwise empty region.
+      return pairedCards*1000+cards.length*100+metadata*5+Math.min(avatars,5)+label;
     };
-    return [...candidates].sort((a,b)=>score(b)-score(a))[0]||null;
+    return [...candidates].map(el=>({el,score:score(el)}))
+      .filter(candidate=>candidate.score>=0)
+      .sort((a,b)=>b.score-a.score)[0]?.el||null;
   }
   function setCaptionVisibility(hide){hideNativeCaptions=!!hide;const el=region();if(!el)return;if(!originalCaptionStyles.has(el))originalCaptionStyles.set(el,{opacity:el.style.getPropertyValue('opacity'),opacityPriority:el.style.getPropertyPriority('opacity'),pointerEvents:el.style.getPropertyValue('pointer-events'),pointerEventsPriority:el.style.getPropertyPriority('pointer-events')});if(hide){el.style.setProperty('opacity','0','important');el.style.setProperty('pointer-events','none','important');}else{const old=originalCaptionStyles.get(el);old.opacity?el.style.setProperty('opacity',old.opacity,old.opacityPriority):el.style.removeProperty('opacity');old.pointerEvents?el.style.setProperty('pointer-events',old.pointerEvents,old.pointerEventsPriority):el.style.removeProperty('pointer-events');}}
   function enableCaptions(){const buttons=SELECTORS.buttons.flatMap(selector=>[...document.querySelectorAll(selector)]);if(buttons.some(b=>/turn off captions/i.test(b.getAttribute('aria-label')||'')))return true;const b=buttons.find(x=>/turn on captions/i.test(x.getAttribute('aria-label')||''));if(b){b.click();return true;}return false;}
