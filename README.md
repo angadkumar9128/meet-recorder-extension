@@ -3,7 +3,7 @@
 A local-first Google Meet recorder and meeting-notes extension for Chrome. Meet Notebook records meeting audio, captures speaker-labelled Google Meet captions, and can run a second speech-recognition pass on-device to help recover words that captions miss.
 
 ![Chrome Extension](https://img.shields.io/badge/Chrome-Manifest%20V3-4285F4?logo=googlechrome&logoColor=white)
-![Version](https://img.shields.io/badge/version-1.7.1-blue)
+![Version](https://img.shields.io/badge/version-1.7.2-blue)
 ![Processing](https://img.shields.io/badge/transcription-on--device-success)
 ![License](https://img.shields.io/badge/license-see%20repository-lightgrey)
 
@@ -385,3 +385,10 @@ For caption-capture debugging, use **Copy caption diagnostics** from the popup o
 - Uses stable caption IDs and incremental upserts so content-script updates cannot erase previously saved captions.
 - Local speech-model checks are no longer a prerequisite to Start. Model installation uses `processLocally: true` and waits for a downloading model to finish.
 - Recognizer result IDs include channel and session identity; interim results are finalized at pause/stop/end and normal restarts do not add a fixed delay.
+
+
+### 1.7.2 — Restore legacy Meet caption block detection
+
+- Search Meet `.nMcdL` caption cards at any nesting depth.
+- Restore the original speaker-avatar ancestor fallback for caption block detection.
+- Accept valid participant names that end with punctuation.
