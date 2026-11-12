@@ -42,7 +42,7 @@ Meet Notebook uses two complementary sources. They are intentionally shown as se
 
 ### 1. Google Meet captions
 
-The content script observes the captions displayed by Google Meet. Caption text is associated with the speaker label supplied by Meet and sent to the notebook. Rolling caption updates are merged so that cumulative snapshots do not unnecessarily repeat earlier words.
+The content script observes individual Google Meet caption cards, extracts the speaker label from card text or accessible metadata, and sends each utterance with its speaker identity. Card parsing excludes shared wrapper nodes so separate remote participants are not combined into one transcript entry.
 
 **Speaker names come from Google Meet captions.** The extension does not claim that it can identify every speaker from a mixed audio recording.
 
@@ -54,6 +54,7 @@ When enabled and supported, Chrome's local Speech Recognition engine processes t
 - The extension checks available language-model quality tiers in this order: `conversation`, `dictation`, then `command`.
 - It installs the highest tier Chrome reports as available for the selected language and device.
 - The transcript is labelled **Live Audio Transcript** and remains separate from speaker-attributed Meet captions.
+- The notebook identifies each row's source as **Meet caption** (speaker-labelled) or **Audio backup** (mixed audio without reliable speaker identity).
 - Conservative duplicate handling merges strong rolling/cumulative matches without treating similar sentence openings as proof that two utterances are duplicates.
 
 A mixed audio track does not provide reliable per-person diarization. Therefore the local transcript cannot reliably say which participant spoke each word.
@@ -316,6 +317,14 @@ GitHub Actions runs the repository's extension checks on pushes and pull request
 For caption-capture debugging, use **Copy caption diagnostics** from the popup or Settings and share only sanitized diagnostics. Caption HTML may contain meeting content and participant information.
 
 ## Release notes
+
+### 1.5.7 — Speaker-labelled Meet caption cards
+
+- Parses Meet caption cards independently rather than depending exclusively on avatar-image ancestry or shared wrapper nodes.
+- Prefers accessible speaker metadata and stable speaker IDs when available.
+- Uses `Speaker N` only when a caption card exposes a stable speaker ID without a readable name; it never invents speaker identity for the mixed audio stream.
+- Displays source labels distinguishing Meet captions from the independent audio backup.
+- Expands sanitized diagnostics to retain useful speaker/card metadata while redacting transcript text.
 
 ### 1.5.6 — Resilient local transcription and conservative deduplication
 
