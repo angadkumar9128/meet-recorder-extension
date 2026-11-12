@@ -46,18 +46,22 @@ The content script observes individual Google Meet caption cards, extracts the s
 
 **Speaker names come from Google Meet captions.** The extension does not claim that it can identify every speaker from a mixed audio recording.
 
-### 2. Live Audio Transcript (on-device)
+### 2. Optional local audio recognition (on-device)
 
-When enabled and supported, Chrome's local Speech Recognition engine processes the combined meeting audio track captured by the extension. This independent pass is intended to recover words omitted or misrecognized by Meet captions.
+When enabled and supported, Chrome's local Speech Recognition API runs two independent recognizers:
 
-- Recognition is configured for on-device processing (`processLocally = true`).
-- The extension checks available language-model quality tiers in this order: `conversation`, `dictation`, then `command`.
-- It installs the highest tier Chrome reports as available for the selected language and device.
-- The transcript is labelled **Live Audio Transcript** and remains separate from speaker-attributed Meet captions.
-- The notebook identifies each row's source as **Meet caption** (speaker-labelled) or **Audio backup** (mixed audio without reliable speaker identity).
-- Conservative duplicate handling merges strong rolling/cumulative matches without treating similar sentence openings as proof that two utterances are duplicates.
+- **Tab channel:** receives only Google Meet tab audio, containing remote participants.
+- **Microphone channel:** receives only the local microphone signal, attributed to the configured name in Settings.
 
-A mixed audio track does not provide reliable per-person diarization. Therefore the local transcript cannot reliably say which participant spoke each word.
+The mixed audio track is reserved for the recording. It is never sent to the recognizer. Meet caption activity timestamps associate tab-channel speech with the dominant non-self caption speaker active around that utterance. Participant names always come from Meet captions; audio attribution is best-effort when captions are delayed or participants interrupt one another.
+
+- Recognition uses processLocally = true.
+- Local ASR is optional. A missing or unavailable language model does not prevent Start, recording, or Meet-caption capture.
+- ASR segments use channel/session/result identifiers, and interim text is finalized when recognition ends or recording pauses/stops.
+- Audio segments substantially covered by a same-speaker Meet caption are hidden from the visible transcript to avoid duplicate lines. Uncovered audio text is retained under the inferred speaker.
+- Microphone segments use the local name from Settings. If no remote caption activity is close enough, the fallback is **Remote participant**.
+
+The conversation, dictation, and command tiers are Chrome model quality options. Command is a basic phrase model and is not recommended for continuous meeting transcription. Model availability varies by Chrome version, device, language, and policy.
 
 ### Speech model quality matters
 
@@ -111,7 +115,7 @@ The extension reports the tier installed on the current device. A successful ins
 
 No Python, FFmpeg, API key, local server, external account, or paid transcription service is required.
 
-> **Important:** The one-time Chrome language-model installation is required for independent local audio transcription. Recording and Meet-caption capture can still be used when local transcription is unavailable or disabled.
+> **Important:** Installing a local Chrome language model is optional. If it cannot be installed, Start still records the meeting and captures Meet captions; only supplementary local ASR is unavailable.
 
 ## Permissions explained
 
@@ -144,16 +148,16 @@ The host permission is restricted to `https://meet.google.com/*`; the extension 
 5. Choose the repository folder containing `manifest.json`.
 6. Pin or open **Meet Notebook** from the Chrome toolbar. You can also use **Alt+Shift+N** (the default `open-notebook` shortcut; customize it at `chrome://extensions/shortcuts`).
 
-### Prepare local transcription (recommended)
+### Optional: prepare local transcription
 
 1. Open a Google Meet meeting or create a test meeting.
 2. Open the Meet Notebook side panel and select **Settings**.
 3. Choose the language spoken in the meeting.
 4. Click **Install / check local speech model**.
 5. Wait for the status message to confirm the installed language and quality tier.
-6. Enable **Live Meeting Transcription (on-device)** and save settings.
+6. Enable **Live Meeting Transcription (on-device)** and save settings. This step is optional; recording and Meet captions work without it.
 
-The model download is a one-time setup per supported language/device environment. Chrome controls which models are available.
+The model download is a one-time setup per supported language/device environment. Chrome controls which models are available. If installation reports downloadable or fails, you can still start a recording.
 
 ### Start a recording
 
@@ -270,7 +274,7 @@ Meet Notebook is designed for local-first use:
 
 Meet Notebook aims to improve transcript coverage, not guarantee a perfect transcript.
 
-- Meet captions are the source of participant names; the local audio transcript cannot reliably identify individual speakers from mixed audio.
+- Meet captions are the source of participant names. Tab-audio speaker attribution is inferred from nearby caption activity and can be ambiguous during overlap or delayed captions; microphone audio is attributed to the configured local user.
 - Accuracy depends on language-model support, model quality, microphone/speaker volume, echo, noise, overlapping speech, accents, and audio quality.
 - Language switching, uncommon names, specialist terminology, interruptions, and multiple people speaking at once can cause errors or omissions.
 - The `command` quality tier is designed for short phrases and should not be treated as a meeting-grade model.
@@ -309,7 +313,7 @@ GitHub Actions runs the repository's extension checks on pushes and pull request
 | Start says to open Meet first | Open a tab whose URL starts with `https://meet.google.com/` and retry. |
 | No Meet caption transcript | Turn on captions in Meet, reload the Meet tab after installing/updating the extension, and retry. |
 | Microphone is missing | Open microphone setup, grant Chrome permission, select the correct input, and check operating-system microphone permissions. |
-| Local model cannot be installed | Check Chrome version, selected language support, available disk space, network access for the one-time download, and device/organization policy restrictions. |
+| Local model cannot be installed | Recording and Meet captions still work. Check Chrome version, selected language support, available disk space, network access, and device/organization policy restrictions if you want supplementary local ASR. |
 | Local transcript is unavailable or low quality | Check the reported model tier. `command` is only a basic fallback; use a device/language that supports `conversation` or `dictation` when possible. |
 | Some words are missing or repeated | Check audio levels, echo, background noise, overlapping speech, and recognizer quality. Some omissions and recognition errors are expected. |
 | Recording cannot be played immediately | Wait for the recording to finalize; playback is available after finalization. |
