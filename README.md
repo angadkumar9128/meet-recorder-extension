@@ -3,7 +3,7 @@
 A local-first Google Meet recorder and meeting-notes extension for Chrome. Meet Notebook records meeting audio, captures speaker-labelled Google Meet captions, and can run a second speech-recognition pass on-device to help recover words that captions miss.
 
 ![Chrome Extension](https://img.shields.io/badge/Chrome-Manifest%20V3-4285F4?logo=googlechrome&logoColor=white)
-![Version](https://img.shields.io/badge/version-1.7.5-blue)
+![Version](https://img.shields.io/badge/version-1.7.2-blue)
 ![Processing](https://img.shields.io/badge/transcription-on--device-success)
 ![License](https://img.shields.io/badge/license-see%20repository-lightgrey)
 
@@ -290,48 +290,11 @@ Meet Notebook aims to improve transcript coverage, not guarantee a perfect trans
 - Language switching, uncommon names, specialist terminology, interruptions, and multiple people speaking at once can cause errors or omissions.
 - The `command` quality tier is designed for short phrases and should not be treated as a meeting-grade model.
 - Recognition sessions can restart after recoverable errors. The extension attempts to preserve the last interim phrase as a marked partial entry, but it may be incomplete.
-- Duplicate suppression merges exact repeats, rolling prefixes, word-boundary overlaps, and substantial shared phrases when Meet recreates a caption card with a short changed lead-in. Short common openings alone are not enough to merge separate speech.
+- Duplicate suppression is conservative. It merges strong exact rolling prefixes and word-boundary overlaps, while keeping ambiguous similar phrases to avoid silently discarding genuine speech.
 - Browser support and local model availability can change across Chrome versions, platforms, and managed-device policies.
 - No missed-word-free or word-perfect transcript can be guaranteed.
 
 For best results, keep the Meet tab open, enable Meet captions, select the same language in Meet and Meet Notebook, use a clear microphone, and reduce background noise and speaker echo.
-
-## Google Meet speaker-attribution regression: known fix
-
-This section records a previously verified fix so future changes do not reintroduce the same caption-capture failure.
-
-### Symptom
-
-Remote participants' captions may appear as **Unattributed audio** in the supplementary audio-backup transcript, even though Google Meet is displaying speaker-labelled captions. In this situation, first verify that the content script is observing the active Meet captions region. Do not start by widening audio timestamp matching or changing speaker-attribution heuristics.
-
-### Root cause
-
-Google Meet can keep more than one captions-like region in the DOM. An empty or inactive region may appear before the region containing the live caption cards. The old implementation used `document.querySelector()` and returned the first matching region, so the observer could attach to the wrong region and never receive the live speaker-labelled caption updates.
-
-### Known-good correction (version 1.7.3)
-
-The correction is in commit [`8ef1acc`](https://github.com/angadkumar9128/meet-recorder-extension/commit/8ef1acc281f39514ce744f69d25db4d8ddbe3373) (**Select the active Meet captions region reliably**):
-
-1. Enumerate all candidate regions with `document.querySelectorAll()` for the configured region selectors; do not return the first match.
-2. Treat a region as a candidate when it has a captions label, confirmed Meet caption-card content, or caption metadata.
-3. Prefer the current Meet card shape: `.nMcdL` containing both `.NWpY1d` (speaker name) and `.ygicle` (utterance text).
-4. Rank candidates using caption-card count, paired speaker/text descendants, caption metadata, avatar elements, and the captions aria-label. Observe the highest-scoring candidate.
-5. Keep the individual caption-card parsing logic separate from region selection. The speaker and utterance must be read from the same card so different participants are not accidentally paired.
-
-The accompanying version/token update is commit [`8e4d051`](https://github.com/angadkumar9128/meet-recorder-extension/commit/8e4d051fbd148765e5269479a515eeb7127ca4e7) (**Bump extension version to 1.7.3**). Both matter: changing the manifest version alone does not guarantee that an already-injected content script is replaced. Update the `INSTANCE_TOKEN` in `content.js` when a new content-script implementation must be injected into an existing Meet tab, then reload the extension and the Meet tab during verification.
-
-### Regression-debugging checklist
-
-When speaker-labelled Meet captions stop appearing or audio backup falls back to **Unattributed audio**:
-
-- Inspect the live DOM and confirm which region actually contains caption cards.
-- Confirm that the active region contains `.nMcdL` cards and that each card has the expected `.NWpY1d` speaker and `.ygicle` text descendants (Meet may change its DOM over time).
-- Confirm the observer is attached to that active region, not an earlier empty/inactive match.
-- Check that each parsed entry retains the speaker and text from the same card.
-- Check the content-script `INSTANCE_TOKEN`; an old injected script can remain active until the Meet tab is reloaded.
-- Only after confirming that speaker-labelled caption entries are reaching the extension should you investigate audio-backup timestamp matching or overlap ambiguity.
-
-**Important distinction:** this fix restores capture of Meet's speaker-labelled captions. It does not make speaker identification from mixed tab audio independently reliable. The audio-backup path still uses nearby Meet caption activity and may legitimately remain unattributed when caption activity is missing, delayed, or overlapping.
 
 ## Development and tests
 
@@ -369,34 +332,6 @@ GitHub Actions runs the repository's extension checks on pushes and pull request
 For caption-capture debugging, use **Copy caption diagnostics** from the popup or Settings and share only sanitized diagnostics. Caption HTML may contain meeting content and participant information.
 
 ## Release notes
-
-### 1.7.6 — Harden active Meet captions region selection
-
-- Continues to inspect every captions-like region instead of selecting the first DOM match.
-- Excludes regions hidden by `hidden`, `aria-hidden`, `display:none`, or `visibility:hidden`, and prioritizes rendered `.nMcdL` cards containing both `.NWpY1d` speaker and `.ygicle` utterance elements.
-- Does not use opacity as a visibility test because the extension can intentionally hide native captions while observing their DOM.
-- Bumps the manifest version and content-script instance token so the updated region selection is injected after reloading the Meet tab.
-
-### 1.7.5 — Improve audio-backup speaker attribution
-
-- Matches tab-audio ASR segments against Meet speaker-activity samples across the segment's full time range instead of only its midpoint.
-- Keeps ambiguous overlaps labelled as unattributed rather than guessing a participant.
-- Adds regression tests for long ASR segments, out-of-window activity, and overlapping speakers.
-- Bumps the content-script instance token so the updated attribution logic is loaded after refreshing the Meet tab.
-
-
-### 1.7.4 — Deduplicate repeated Meet caption snapshots
-
-- Detects rolling caption corrections that repeat a substantial phrase after a short changed lead-in (for example, when Meet changes the opening words as it replaces a caption card).
-- Keeps the earlier short lead-in and uses the newer caption from the shared phrase onward, avoiding repeated sentence fragments while retaining genuinely new speech.
-- Adds regression tests for the reported repeated-caption pattern and for distinct sentences that share only a short opening.
-- Bumps the content-script instance token so Chrome loads the updated transcript logic after the Meet tab is refreshed.
-
-### 1.7.3 — Select the active Meet captions region
-
-- Scores all matching caption regions and observes the region containing the actual Meet caption cards instead of blindly selecting the first matching region.
-- Avoids attaching to empty or inactive caption regions when Meet keeps more than one captions container in the DOM.
-
 
 ### 1.7.1 — Fix current Meet caption card detection
 

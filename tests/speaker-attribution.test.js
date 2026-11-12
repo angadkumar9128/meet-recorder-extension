@@ -7,7 +7,3 @@ test('caption parser extracts speaker from a single labelled caption line',()=>a
 test('caption parser accepts speaker name and multi-line caption text',()=>assert.deepEqual(t.parseCaptionLines(['Sonoj','OK Angad, today I will complete this Jira task.']),{speaker:'Sonoj',text:'OK Angad, today I will complete this Jira task.'}));
 
 test('caption parser strips a duplicated speaker prefix when metadata already identifies them',()=>assert.deepEqual(t.parseCaptionLines(['Angad: Hey, clear the Jira ticket today.'],'Angad'),{speaker:'Angad',text:'Hey, clear the Jira ticket today.'}));
-
-test('long tab ASR segments match caption activity anywhere inside their time range',()=>assert.equal(t.resolveSpeaker({channel:'tab',at:10000,endAt:20000},[{speaker:'Sanoj',at:17500}],{myName:'Angad'}),'Sanoj'));
-test('tab ASR still ignores caption activity outside the segment tolerance',()=>assert.equal(t.resolveSpeaker({channel:'tab',at:10000,endAt:12000},[{speaker:'Sanoj',at:15001}],{myName:'Angad'}),'Unattributed audio'));
-test('tab ASR keeps overlapping speakers ambiguous across the segment window',()=>assert.equal(t.resolveSpeaker({channel:'tab',at:10000,endAt:20000},[{speaker:'Sanoj',at:15000},{speaker:'Priya',at:15100}],{myName:'Angad'}),'Unattributed audio'));
