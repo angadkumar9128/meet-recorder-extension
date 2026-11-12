@@ -7,7 +7,7 @@
     regions:['[role="region"][aria-label*="caption" i]','[aria-label="Captions"]','[aria-label*="caption" i][role="group"]','[aria-live]'],
     buttons:['button[aria-label*="turn on captions" i]','button[aria-label*="turn off captions" i]'],
     tiles:['[data-participant-id]','[data-self-name]','[role="listitem"][aria-label]'],
-    cards:['[data-caption-id]','[data-message-id]','[data-speaker-id]','[role="listitem"]','[role="group"]']
+    cards:['.nMcdL','[data-caption-id]','[data-message-id]','[data-speaker-id]','[role="listitem"]','[role="group"]']
   };
   let entries=[],observer=null,observedRegion=null,rootObserver=null,persistTimer=null,reattachTimer=null,rosterTimer=null,publishTimer=null;
   let sessionId=null,elapsedBeforePause=0,activeSegmentStart=0,paused=false,hideNativeCaptions=true;
@@ -27,6 +27,13 @@
   function metadataSpeaker(card){const extract=v=>{v=String(v||'').trim();if(!v)return '';const patterns=[/^(?:speaker|participant|from|caption(?:s)?(?:\s+from)?)\s*[:—-]\s*(.+)$/i,/^(.{1,80}?)\s+(?:said|says|speaking)\b/i,/^(.{1,80}?)\s*[:—-]\s*.+$/];for(const pattern of patterns){const m=v.match(pattern);if(m&&speakerLike(m[1].trim()))return m[1].trim().replace(/\s*\(you\)\s*$/i,'').trim();}if(speakerLike(v)&&!/(caption|participant|speaker|microphone)/i.test(v))return v.replace(/\s*\(you\)\s*$/i,'').trim();return '';};for(let current=card,depth=0;current&&depth<4;current=current.parentElement,depth++){for(const attr of ['data-speaker-name','data-author-name','aria-label','title']){const name=extract(current.getAttribute?.(attr));if(name)return name;}const node=current.querySelector?.('[data-speaker-name],[data-author-name],[aria-label*="speaker" i],[aria-label*="participant" i]');if(node&&node!==current){for(const attr of ['data-speaker-name','data-author-name','aria-label','title']){const name=extract(node.getAttribute?.(attr));if(name)return name;}const name=extract(node.textContent);if(name)return name;}}return '';}
   function captionBlocks(root){
     const candidates=new Set();
+    // Current Google Meet caption DOM (confirmed from the user's sanitized
+    // diagnostics): each .nMcdL card contains the speaker in .NWpY1d and
+    // the utterance in .ygicle. Prefer these exact card boundaries so the
+    // speaker and its text are never accidentally paired across participants.
+    root.querySelectorAll(':scope > .nMcdL').forEach(el=>{
+      if(el.querySelector('.NWpY1d')&&el.querySelector('.ygicle'))candidates.add(el);
+    });
     for(const selector of SELECTORS.cards)root.querySelectorAll(selector).forEach(el=>candidates.add(el));
     root.querySelectorAll('img,[role="img"]').forEach(img=>{let el=img.parentElement;while(el&&el!==root){const ls=cleanLines(el);if(ls.length>=2){candidates.add(el);break;}el=el.parentElement;}});
     // Compatibility fallback: older Meet builds expose caption cards only as
@@ -36,7 +43,15 @@
     // Prefer each individual card; do not collapse sibling captions into a shared wrapper.
     return valid.filter(el=>!valid.some(child=>child!==el&&el.contains(child)));
   }
-  function parseCaptionCard(card){const ls=cleanLines(card),metadata=metadataSpeaker(card);let parsed=MeetNotebookTranscript.parseCaptionLines(ls,metadata),speaker=parsed?.speaker||'',text=parsed?.text||'';if(!parsed&&metadata&&ls.length){speaker=metadata;text=ls.filter(x=>x!==metadata).join(' ').trim();}if(!text)return null;if(!speaker){const id=card.getAttribute('data-speaker-id')||card.getAttribute('data-participant-id')||card.parentElement?.getAttribute('data-speaker-id')||card.parentElement?.getAttribute('data-participant-id');if(id){if(!fallbackSpeakerIds.has(id))fallbackSpeakerIds.set(id,'Speaker '+(fallbackSpeakerIds.size+1));speaker=fallbackSpeakerIds.get(id);}}if(!speaker||!speakerLike(speaker)||text.length>2000)return null;return{speaker,text:text.replace(/\s+/g,' ').trim()};}
+  function parseCaptionCard(card){
+    // Current Meet renders speaker + text in distinct descendants. Read them
+    // directly before applying generic/legacy heuristics.
+    const meetName=card.querySelector?.('.NWpY1d')?.textContent?.trim()||'';
+    const meetText=card.querySelector?.('.ygicle')?.textContent?.trim()||'';
+    if(meetName&&meetText&&speakerLike(meetName)&&meetText.length<=2000){
+      return{speaker:meetName.replace(/\\s*\\(you\\)\\s*$/i,'').trim(),text:meetText.replace(/\\s+/g,' ').trim()};
+    }
+    const ls=cleanLines(card),metadata=metadataSpeaker(card);let parsed=MeetNotebookTranscript.parseCaptionLines(ls,metadata),speaker=parsed?.speaker||'',text=parsed?.text||'';if(!parsed&&metadata&&ls.length){speaker=metadata;text=ls.filter(x=>x!==metadata).join(' ').trim();}if(!text)return null;if(!speaker){const id=card.getAttribute('data-speaker-id')||card.getAttribute('data-participant-id')||card.parentElement?.getAttribute('data-speaker-id')||card.parentElement?.getAttribute('data-participant-id');if(id){if(!fallbackSpeakerIds.has(id))fallbackSpeakerIds.set(id,'Speaker '+(fallbackSpeakerIds.size+1));speaker=fallbackSpeakerIds.get(id);}}if(!speaker||!speakerLike(speaker)||text.length>2000)return null;return{speaker,text:text.replace(/\s+/g,' ').trim()};}
   function fingerprint(speaker,text){return speaker.toLocaleLowerCase()+'|'+text.toLocaleLowerCase().normalize('NFKC').replace(/\s+/g,' ').trim();}
   function scheduleCommit(entry){const old=commitTimers.get(entry);if(old)clearTimeout(old);entry.committed=false;commitTimers.set(entry,setTimeout(()=>{entry.committed=true;commitTimers.delete(entry);markChanged(entry,entry.speaker);publish();},850));}
   function flushPublish(){if(publishTimer){clearTimeout(publishTimer);publishTimer=null;}if(!sessionId)return publishQueue;const snapshot=[...changedEntries.values()].map(e=>({...e})),samples=activitySamples.splice(0),id=sessionId;changedEntries.clear();if(!snapshot.length&&!samples.length)return publishQueue;publishQueue=publishQueue.then(()=>sendRuntimeMessage({type:'TRANSCRIPT_UPDATE',sessionId:id,entries:snapshot,samples})).catch(()=>{});return publishQueue;}
