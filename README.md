@@ -370,6 +370,13 @@ For caption-capture debugging, use **Copy caption diagnostics** from the popup o
 
 ## Release notes
 
+### 1.7.6 — Harden active Meet captions region selection
+
+- Continues to inspect every captions-like region instead of selecting the first DOM match.
+- Excludes regions hidden by `hidden`, `aria-hidden`, `display:none`, or `visibility:hidden`, and prioritizes rendered `.nMcdL` cards containing both `.NWpY1d` speaker and `.ygicle` utterance elements.
+- Does not use opacity as a visibility test because the extension can intentionally hide native captions while observing their DOM.
+- Bumps the manifest version and content-script instance token so the updated region selection is injected after reloading the Meet tab.
+
 ### 1.7.5 — Improve audio-backup speaker attribution
 
 - Matches tab-audio ASR segments against Meet speaker-activity samples across the segment's full time range instead of only its midpoint.
