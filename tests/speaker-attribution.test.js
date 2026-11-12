@@ -5,3 +5,5 @@ test('ambiguous tab activity is not guessed as a participant',()=>assert.equal(t
 test('tab audio uses the dominant nearby Meet speaker activity',()=>assert.equal(t.resolveSpeaker({channel:'tab',at:10000,endAt:11000},[{speaker:'Angad',at:10000},{speaker:'Sanoj',at:10100},{speaker:'Sanoj',at:10300}],{myName:'Angad'}),'Sanoj'));
 test('caption parser extracts speaker from a single labelled caption line',()=>assert.deepEqual(t.parseCaptionLines(['Angad: Hey, clear the Jira ticket today.']),{speaker:'Angad',text:'Hey, clear the Jira ticket today.'}));
 test('caption parser accepts speaker name and multi-line caption text',()=>assert.deepEqual(t.parseCaptionLines(['Sonoj','OK Angad, today I will complete this Jira task.']),{speaker:'Sonoj',text:'OK Angad, today I will complete this Jira task.'}));
+
+test('caption parser strips a duplicated speaker prefix when metadata already identifies them',()=>assert.deepEqual(t.parseCaptionLines(['Angad: Hey, clear the Jira ticket today.'],'Angad'),{speaker:'Angad',text:'Hey, clear the Jira ticket today.'}));
