@@ -1,5 +1,5 @@
 (() => {
-  const INSTANCE_TOKEN='meet-notebook-content-v1.7.1';
+  const INSTANCE_TOKEN='meet-notebook-content-v1.7.3';
   if(window.__meetNotebookLoaded===INSTANCE_TOKEN)return;
   window.__meetNotebookLoaded=INSTANCE_TOKEN;
   try{if(typeof chrome==='undefined'||!chrome.runtime||!chrome.runtime.id)return;}catch(_){return;}
@@ -18,7 +18,30 @@
   const commitTimers=new Map(),originalCaptionStyles=new WeakMap();
   const elapsed=()=>Math.max(0,Math.floor((elapsedBeforePause+(activeSegmentStart?performance.now()-activeSegmentStart:0))/1000));
   function sendRuntimeMessage(message){try{if(typeof chrome==='undefined'||!chrome.runtime||!chrome.runtime.id)return Promise.resolve(null);return chrome.runtime.sendMessage(message).catch(()=>null);}catch(_){return Promise.resolve(null);}}
-  function region(){for(const selector of SELECTORS.regions){const el=document.querySelector(selector);if(el&&((el.getAttribute('aria-label')||'').toLowerCase().includes('caption')||el.querySelector('img,[role="img"]')||el.querySelector('[data-caption-id],[data-message-id],[data-speaker-id]')))return el;}return null;}
+  function region(){
+    // Meet can keep an empty/hidden captions region in the DOM while rendering
+    // the active captions in a second region. Never trust the first match.
+    const candidates=new Set();
+    for(const selector of SELECTORS.regions){
+      document.querySelectorAll(selector).forEach(el=>{
+        const label=(el.getAttribute('aria-label')||'').toLowerCase();
+        const hasMeetCards=!!el.querySelector('.nMcdL .NWpY1d,.nMcdL .ygicle');
+        const hasCaptionMetadata=!!el.querySelector('[data-caption-id],[data-message-id],[data-speaker-id]');
+        if(label.includes('caption')||hasMeetCards||hasCaptionMetadata)candidates.add(el);
+      });
+    }
+    if(!candidates.size)return null;
+    const score=el=>{
+      const cards=el.querySelectorAll('.nMcdL').length;
+      const paired=el.querySelectorAll('.nMcdL .NWpY1d').length+
+        el.querySelectorAll('.nMcdL .ygicle').length;
+      const metadata=el.querySelectorAll('[data-caption-id],[data-message-id],[data-speaker-id]').length;
+      const avatars=el.querySelectorAll('img,[role="img"]').length;
+      const label=((el.getAttribute('aria-label')||'').toLowerCase().includes('caption'))?2:0;
+      return cards*100+paired*10+metadata*5+Math.min(avatars,5)+label;
+    };
+    return [...candidates].sort((a,b)=>score(b)-score(a))[0]||null;
+  }
   function setCaptionVisibility(hide){hideNativeCaptions=!!hide;const el=region();if(!el)return;if(!originalCaptionStyles.has(el))originalCaptionStyles.set(el,{opacity:el.style.getPropertyValue('opacity'),opacityPriority:el.style.getPropertyPriority('opacity'),pointerEvents:el.style.getPropertyValue('pointer-events'),pointerEventsPriority:el.style.getPropertyPriority('pointer-events')});if(hide){el.style.setProperty('opacity','0','important');el.style.setProperty('pointer-events','none','important');}else{const old=originalCaptionStyles.get(el);old.opacity?el.style.setProperty('opacity',old.opacity,old.opacityPriority):el.style.removeProperty('opacity');old.pointerEvents?el.style.setProperty('pointer-events',old.pointerEvents,old.pointerEventsPriority):el.style.removeProperty('pointer-events');}}
   function enableCaptions(){const buttons=SELECTORS.buttons.flatMap(selector=>[...document.querySelectorAll(selector)]);if(buttons.some(b=>/turn off captions/i.test(b.getAttribute('aria-label')||'')))return true;const b=buttons.find(x=>/turn on captions/i.test(x.getAttribute('aria-label')||''));if(b){b.click();return true;}return false;}
   const junk=/^(jump to bottom|caption settings|format size|settings|arrow_downward|more options|mic|volume up)$/i;
