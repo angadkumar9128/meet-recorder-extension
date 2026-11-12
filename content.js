@@ -23,7 +23,7 @@
   function enableCaptions(){const buttons=SELECTORS.buttons.flatMap(selector=>[...document.querySelectorAll(selector)]);if(buttons.some(b=>/turn off captions/i.test(b.getAttribute('aria-label')||'')))return true;const b=buttons.find(x=>/turn on captions/i.test(x.getAttribute('aria-label')||''));if(b){b.click();return true;}return false;}
   const junk=/^(jump to bottom|caption settings|format size|settings|arrow_downward|more options|mic|volume up)$/i;
   function cleanLines(el){return (el.innerText||el.textContent||'').split('\n').map(v=>v.trim()).filter(v=>v&&!junk.test(v)&&!/^[a-z]+(_[a-z]+)+$/i.test(v));}
-  function speakerLike(v){v=String(v||'').trim();return !!v&&v.length<=80&&!junk.test(v)&&!/^(you|your microphone|microphone|captions?|remote participant|unattributed audio)$/i.test(v)&&v.split(/\s+/).length<=8&&!/[.!?。！？]$/.test(v);}
+  function speakerLike(v){v=String(v||'').trim();return !!v&&v.length<=80&&!junk.test(v)&&!/^(you|your microphone|microphone|captions?|remote participant|unattributed audio)$/i.test(v)&&v.split(/\s+/).length<=8;}
   function metadataSpeaker(card){const extract=v=>{v=String(v||'').trim();if(!v)return '';const patterns=[/^(?:speaker|participant|from|caption(?:s)?(?:\s+from)?)\s*[:—-]\s*(.+)$/i,/^(.{1,80}?)\s+(?:said|says|speaking)\b/i,/^(.{1,80}?)\s*[:—-]\s*.+$/];for(const pattern of patterns){const m=v.match(pattern);if(m&&speakerLike(m[1].trim()))return m[1].trim().replace(/\s*\(you\)\s*$/i,'').trim();}if(speakerLike(v)&&!/(caption|participant|speaker|microphone)/i.test(v))return v.replace(/\s*\(you\)\s*$/i,'').trim();return '';};for(let current=card,depth=0;current&&depth<4;current=current.parentElement,depth++){for(const attr of ['data-speaker-name','data-author-name','aria-label','title']){const name=extract(current.getAttribute?.(attr));if(name)return name;}const node=current.querySelector?.('[data-speaker-name],[data-author-name],[aria-label*="speaker" i],[aria-label*="participant" i]');if(node&&node!==current){for(const attr of ['data-speaker-name','data-author-name','aria-label','title']){const name=extract(node.getAttribute?.(attr));if(name)return name;}const name=extract(node.textContent);if(name)return name;}}return '';}
   function captionBlocks(root){
     const candidates=new Set();
@@ -31,10 +31,21 @@
     // diagnostics): each .nMcdL card contains the speaker in .NWpY1d and
     // the utterance in .ygicle. Prefer these exact card boundaries so the
     // speaker and its text are never accidentally paired across participants.
-    root.querySelectorAll(':scope > .nMcdL').forEach(el=>{
+    root.querySelectorAll('.nMcdL').forEach(el=>{
       if(el.querySelector('.NWpY1d')&&el.querySelector('.ygicle'))candidates.add(el);
     });
     for(const selector of SELECTORS.cards)root.querySelectorAll(selector).forEach(el=>candidates.add(el));
+    // Preserve the original working Meet strategy: walk upward from each
+    // speaker avatar and identify the smallest caption block containing both
+    // speaker and utterance text. Some Meet builds nest cards below wrappers.
+    root.querySelectorAll('img,[role="img"]').forEach(img=>{
+      let el=img.parentElement;
+      while(el&&el!==root){
+        if(el.matches?.('.nMcdL')){candidates.add(el);break;}
+        if(cleanLines(el).length>=2){candidates.add(el);break;}
+        el=el.parentElement;
+      }
+    });
     root.querySelectorAll('img,[role="img"]').forEach(img=>{let el=img.parentElement;while(el&&el!==root){const ls=cleanLines(el);if(ls.length>=2){candidates.add(el);break;}el=el.parentElement;}});
     // Compatibility fallback: older Meet builds expose caption cards only as
     // direct children of the live caption region, without stable data/ARIA IDs.
