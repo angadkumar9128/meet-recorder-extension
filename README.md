@@ -3,7 +3,7 @@
 A local-first Google Meet recorder and meeting-notes extension for Chrome. Meet Notebook records meeting audio, captures speaker-labelled Google Meet captions, and can run a second speech-recognition pass on-device to help recover words that captions miss.
 
 ![Chrome Extension](https://img.shields.io/badge/Chrome-Manifest%20V3-4285F4?logo=googlechrome&logoColor=white)
-![Version](https://img.shields.io/badge/version-1.7.2-blue)
+![Version](https://img.shields.io/badge/version-1.7.4-blue)
 ![Processing](https://img.shields.io/badge/transcription-on--device-success)
 ![License](https://img.shields.io/badge/license-see%20repository-lightgrey)
 
@@ -290,7 +290,7 @@ Meet Notebook aims to improve transcript coverage, not guarantee a perfect trans
 - Language switching, uncommon names, specialist terminology, interruptions, and multiple people speaking at once can cause errors or omissions.
 - The `command` quality tier is designed for short phrases and should not be treated as a meeting-grade model.
 - Recognition sessions can restart after recoverable errors. The extension attempts to preserve the last interim phrase as a marked partial entry, but it may be incomplete.
-- Duplicate suppression is conservative. It merges strong exact rolling prefixes and word-boundary overlaps, while keeping ambiguous similar phrases to avoid silently discarding genuine speech.
+- Duplicate suppression merges exact repeats, rolling prefixes, word-boundary overlaps, and substantial shared phrases when Meet recreates a caption card with a short changed lead-in. Short common openings alone are not enough to merge separate speech.
 - Browser support and local model availability can change across Chrome versions, platforms, and managed-device policies.
 - No missed-word-free or word-perfect transcript can be guaranteed.
 
@@ -332,6 +332,19 @@ GitHub Actions runs the repository's extension checks on pushes and pull request
 For caption-capture debugging, use **Copy caption diagnostics** from the popup or Settings and share only sanitized diagnostics. Caption HTML may contain meeting content and participant information.
 
 ## Release notes
+
+### 1.7.4 — Deduplicate repeated Meet caption snapshots
+
+- Detects rolling caption corrections that repeat a substantial phrase after a short changed lead-in (for example, when Meet changes the opening words as it replaces a caption card).
+- Keeps the earlier short lead-in and uses the newer caption from the shared phrase onward, avoiding repeated sentence fragments while retaining genuinely new speech.
+- Adds regression tests for the reported repeated-caption pattern and for distinct sentences that share only a short opening.
+- Bumps the content-script instance token so Chrome loads the updated transcript logic after the Meet tab is refreshed.
+
+### 1.7.3 — Select the active Meet captions region
+
+- Scores all matching caption regions and observes the region containing the actual Meet caption cards instead of blindly selecting the first matching region.
+- Avoids attaching to empty or inactive caption regions when Meet keeps more than one captions container in the DOM.
+
 
 ### 1.7.1 — Fix current Meet caption card detection
 
