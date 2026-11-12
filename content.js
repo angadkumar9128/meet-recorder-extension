@@ -1,5 +1,5 @@
 (() => {
-  const INSTANCE_TOKEN='meet-notebook-content-v1.7.3';
+  const INSTANCE_TOKEN='meet-notebook-content-v1.7.4';
   if(window.__meetNotebookLoaded===INSTANCE_TOKEN)return;
   window.__meetNotebookLoaded=INSTANCE_TOKEN;
   try{if(typeof chrome==='undefined'||!chrome.runtime||!chrome.runtime.id)return;}catch(_){return;}
