@@ -5,7 +5,7 @@
 <nav><button class="tab active" data-view="live">Live notes</button><button class="tab" data-view="past">Past meetings</button><button class="tab" data-view="settings">Settings</button></nav>
 <main id="live"><section class="controls"><div><button id="start" class="primary">Start</button><button id="pause" disabled>Pause</button><button id="stop" class="danger" disabled>Stop</button></div><p id="status">Open a Meet tab to begin.</p><div class="meters"><label>Meet <meter id="tabMeter" min="0" max="1" value="0"></meter></label><label>Mic <meter id="micMeter" min="0" max="1" value="0"></meter></label></div></section>
 <section id="playbackPanel" class="playback" hidden><strong>Recording playback</strong><video id="player" controls preload="metadata"></video><small>Use the video timeline to seek. Playback is available after recording is finalized.</small></section>
-<input id="search" type="search" placeholder="Search transcript…"><div id="transcript"><p class="empty">Live Meeting Transcription and Meet captions will appear here when recording starts.</p></div>
+<input id="search" type="search" placeholder="Search transcript…"><div id="transcript"><p class="empty">Speaker-labelled Meet captions will appear here when available. The independent audio source remains separate.</p></div>
 <div class="note"><textarea id="manualNote" rows="2" placeholder="Add a note…"></textarea><button id="addNote">Add</button></div>
 <footer><button data-format="txt">TXT</button><button data-format="md">MD</button><button data-format="json">JSON</button><button id="copy">Copy</button><button id="video">Play / seek</button></footer></main>
 <main id="past" hidden><div id="sessions"></div></main>
@@ -22,7 +22,7 @@
 <button id="installSpeechPack">Install / check local speech model</button>
 <p id="speechModelStatus" class="hint" role="status" aria-live="polite">Choose a language and install its local model. Chrome selects the highest quality supported by your device; command quality is a basic phrase model and is not optimized for continuous meetings.</p>
 <button id="micSetup">Test microphone / grant access</button>
-<p class="hint">Meet captions provide speaker names. A separate on-device recognizer transcribes the combined meeting audio to help recover speech that Meet captions miss. Its transcript is labelled Live Audio Transcript; individual speakers cannot be identified reliably from the mixed audio. Install the selected Chrome language model once before recording. No API key, server or external account is used. Sensitivity and voice enhancement affect the recorded audio.</p>
+<p class="hint">Meet captions provide speaker names. A separate on-device recognizer transcribes the combined meeting audio to help recover speech that Meet captions miss. Its transcript is labelled Live Audio Transcript as a separate audio-backup source. Names in the main transcript come from Meet's individual caption cards. Install the selected Chrome language model once before recording. No API key, server or external account is used. Sensitivity and voice enhancement affect the recorded audio.</p>
 <p class="privacy">Recordings and transcripts stay in this browser. Tell all participants before recording.</p>
 <button id="save" class="primary">Save settings</button><button id="diagnostics">Copy caption diagnostics</button>
 </main>
