@@ -21,6 +21,7 @@ function render(){
 async function refresh(){
   state=await request('GET_STATE');sessionId=state.sessionId||sessionId;renderState();
   if(sessionId){const r=await request('GET_TRANSCRIPT',{sessionId});entries=r.entries||[];render();}
+  const transcriptionStatus=await chrome.storage.local.get('audioTranscriptionStatus');if(transcriptionStatus.audioTranscriptionStatus)$('status').textContent=transcriptionStatus.audioTranscriptionStatus;
   clearInterval(timer);timer=setInterval(renderState,250);
 }
 function setSpeechModelStatus(message,isError=false){
