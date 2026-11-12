@@ -28,3 +28,5 @@ mark{background:#ffe69a;color:#202124}[hidden]{display:none!important}@keyframes
 body[data-theme=dark]{color-scheme:dark;--bg:#181a1c;--panel:#22262a;--text:#e8eaed;--muted:#aab0b7;--line:#383e44;--soft:#263448}
 body[data-theme=light]{color-scheme:light;--bg:#f7f9fc;--panel:#fff;--text:#202124;--muted:#687078;--line:#e2e6ec;--soft:#eaf1fb}
 #speechModelStatus{margin:8px 0 12px}#speechModelStatus[data-state=error]{color:var(--red);border:1px solid var(--red)}#installSpeechPack:disabled{opacity:.65;cursor:wait}
+
+.source-tag{margin-left:4px;color:var(--muted);font-size:9px;text-transform:uppercase;letter-spacing:.04em}.audio-backup{border-left:3px solid var(--blue)}
