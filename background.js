@@ -87,9 +87,17 @@ chrome.runtime.onMessage.addListener((msg,sender,reply)=>{
           const entry={...(msg.entry||{}),source:msg.type==='NOTE_UPDATE'?'note':'local-asr'};
           const normalized=normalizeSpeech(entry.text);let duplicate=false,merged=false;
           if(normalized&&msg.type==='LOCAL_TRANSCRIPT_UPDATE'){
-            const duplicateOfMeet=entries.some(e=>e.source==='meet'&&normalizeSpeech(e.text)===normalized&&Math.abs((e.t||0)-(entry.t||0))<=8);
-            if(duplicateOfMeet)duplicate=true;
-            else{const mergeResult=MeetNotebookTranscript.mergeRecentSpeechEntry(entries,entry,12);duplicate=mergeResult.duplicate;merged=mergeResult.merged;}
+            if(entry.id){
+              const existingIndex=entries.findIndex(e=>e.source==='local-asr'&&e.id===entry.id);
+              if(existingIndex>=0){
+                entries[existingIndex]={...entries[existingIndex],...entry,updatedAt:Date.now()};
+                merged=true;
+              }else{entries.push({...entry,updatedAt:Date.now()});merged=true;}
+            }else{
+              const duplicateOfMeet=entries.some(e=>e.source==='meet'&&normalizeSpeech(e.text)===normalized&&Math.abs((e.t||0)-(entry.t||0))<=8);
+              if(duplicateOfMeet)duplicate=true;
+              else{const mergeResult=MeetNotebookTranscript.mergeRecentSpeechEntry(entries,entry,12);duplicate=mergeResult.duplicate;merged=mergeResult.merged;}
+            }
           }else if(normalized){
             duplicate=entries.some(e=>e.source==='note'&&Math.abs((e.t||0)-(entry.t||0))<=4&&normalizeSpeech(e.text)===normalized);
             if(!duplicate)entries.push(entry);
