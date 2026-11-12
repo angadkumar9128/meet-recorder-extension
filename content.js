@@ -1,337 +1,39 @@
 (() => {
   if (window.__meetNotebookLoaded) return;
   window.__meetNotebookLoaded = true;
-
-  const SELECTORS = {
-    regions: [
-      '[role="region"][aria-label*="caption" i]',
-      '[aria-label="Captions"]',
-      '[aria-label*="caption" i][role="group"]',
-      '[aria-live]'
-    ],
-    buttons: [
-      'button[aria-label*="turn on captions" i]',
-      'button[aria-label*="turn off captions" i]'
-    ],
-    tiles: ['[data-participant-id]', '[data-self-name]', '[role="listitem"][aria-label]']
+  const SELECTORS={
+    regions:['[role="region"][aria-label*="caption" i]','[aria-label="Captions"]','[aria-label*="caption" i][role="group"]','[aria-live]'],
+    buttons:['button[aria-label*="turn on captions" i]','button[aria-label*="turn off captions" i]'],
+    tiles:['[data-participant-id]','[data-self-name]','[role="listitem"][aria-label]'],
+    cards:['[data-caption-id]','[data-message-id]','[data-speaker-id]','[role="listitem"]','[role="group"]']
   };
-
-  let entries = [];
-  let observer = null;
-  let observedRegion = null;
-  let rootObserver = null;
-  let persistTimer = null;
-  let reattachTimer = null;
-  let rosterTimer = null;
-  let publishTimer = null;
-  let sessionId = null;
-  let elapsedBeforePause = 0;
-  let activeSegmentStart = 0;
-  let paused = false;
-  let hideNativeCaptions = true;
-  let nodeEntries = new WeakMap();
-  let seenCaptionFingerprints = new Map();
-  let publishQueue = Promise.resolve();
-  const commitTimers = new Map();
-  const originalCaptionStyles = new WeakMap();
-
-  const elapsed = () => Math.max(0, Math.floor(
-    (elapsedBeforePause + (activeSegmentStart ? performance.now() - activeSegmentStart : 0)) / 1000
-  ));
-
-  // A Meet tab can outlive an extension update/reload. In that case Chrome
-  // invalidates the old content-script context and runtime messaging may throw
-  // synchronously (before returning a Promise). Treat that as a stale session.
-  function sendRuntimeMessage(message) {
-    try {
-      if (typeof chrome === 'undefined' || !chrome.runtime || !chrome.runtime.id) {
-        return Promise.resolve(null);
-      }
-      return chrome.runtime.sendMessage(message).catch(() => null);
-    } catch (_) {
-      return Promise.resolve(null);
-    }
-  }
-
-
-  function region() {
-    for (const selector of SELECTORS.regions) {
-      const element = document.querySelector(selector);
-      if (element && (
-        (element.getAttribute('aria-label') || '').toLowerCase().includes('caption') ||
-        element.querySelector('img,[role="img"]')
-      )) return element;
-    }
-    return null;
-  }
-
-  function setCaptionVisibility(hide) {
-    hideNativeCaptions = !!hide;
-    const element = region();
-    if (!element) return;
-    if (!originalCaptionStyles.has(element)) {
-      originalCaptionStyles.set(element, {
-        opacity: element.style.getPropertyValue('opacity'),
-        opacityPriority: element.style.getPropertyPriority('opacity'),
-        pointerEvents: element.style.getPropertyValue('pointer-events'),
-        pointerEventsPriority: element.style.getPropertyPriority('pointer-events')
-      });
-    }
-    if (hide) {
-      element.style.setProperty('opacity', '0', 'important');
-      element.style.setProperty('pointer-events', 'none', 'important');
-    } else {
-      const old = originalCaptionStyles.get(element);
-      old.opacity ? element.style.setProperty('opacity', old.opacity, old.opacityPriority) : element.style.removeProperty('opacity');
-      old.pointerEvents ? element.style.setProperty('pointer-events', old.pointerEvents, old.pointerEventsPriority) : element.style.removeProperty('pointer-events');
-    }
-  }
-
-  function enableCaptions() {
-    const buttons = SELECTORS.buttons.flatMap(selector => [...document.querySelectorAll(selector)]);
-    if (buttons.some(button => /turn off captions/i.test(button.getAttribute('aria-label') || ''))) return true;
-    const button = buttons.find(item => /turn on captions/i.test(item.getAttribute('aria-label') || ''));
-    if (button) { button.click(); return true; }
-    return false;
-  }
-
-  const junk = /^(jump to bottom|caption settings|format size|settings|arrow_downward|more options|mic|volume up)$/i;
-  function lines(element) {
-    return (element.innerText || '').split('\n').map(value => value.trim())
-      .filter(value => value && !junk.test(value) && !/^[a-z]+(_[a-z]+)+$/i.test(value));
-  }
-
-  function blocks(captionRegion) {
-    const output = new Set();
-    captionRegion.querySelectorAll('img,[role="img"]').forEach(image => {
-      let element = image.parentElement;
-      while (element && element !== captionRegion) {
-        if (element.querySelectorAll('img,[role="img"]').length > 1) break;
-        if (lines(element).length >= 2) { output.add(element); break; }
-        element = element.parentElement;
-      }
-    });
-    if (!output.size) {
-      const root = captionRegion.firstElementChild || captionRegion;
-      [...root.children].forEach(element => { if (lines(element).length >= 2) output.add(element); });
-    }
-    return [...output];
-  }
-
-  function fingerprint(speaker, text) {
-    return speaker.toLocaleLowerCase() + '|' +
-      text.toLocaleLowerCase().normalize('NFKC').replace(/\s+/g, ' ').trim();
-  }
-
-  function scheduleCommit(entry) {
-    const old = commitTimers.get(entry);
-    if (old) clearTimeout(old);
-    entry.committed = false;
-    commitTimers.set(entry, setTimeout(() => {
-      entry.committed = true;
-      commitTimers.delete(entry);
-      publish();
-    }, 850));
-  }
-
-  function flushPublish() {
-    if (publishTimer) { clearTimeout(publishTimer); publishTimer = null; }
-    if (!sessionId) return publishQueue;
-    const snapshot = entries.map(entry => ({ ...entry }));
-    const id = sessionId;
-    publishQueue = publishQueue
-      .then(() => sendRuntimeMessage({ type: 'TRANSCRIPT_UPDATE', sessionId: id, entries: snapshot }))
-      .catch(() => {});
-    return publishQueue;
-  }
-  function publish() {
-    if (!sessionId || publishTimer) return;
-    // A fixed-rate trailing publish prevents a continuous speaker from continually
-    // resetting a debounce timer and starving the live side panel of updates.
-    publishTimer = setTimeout(() => { publishTimer = null; flushPublish(); }, 120);
-  }
-
-  function scan() {
-    if (paused) return;
-    const captionRegion = region();
-    if (!captionRegion) return;
-
-    // A DOM caption card represents one utterance. Only updates to that same card
-    // are merged; separate cards from the same speaker remain separate turns.
-    for (const block of blocks(captionRegion)) {
-      const values = lines(block);
-      if (values.length < 2) continue;
-      const speaker = values[0].replace(/\s*\(you\)\s*$/i, '').trim();
-      const text = values.slice(1).join(' ').replace(/\s+/g, ' ').trim();
-      if (!speaker || !text || speaker.length > 80 || text.length > 2000) continue;
-
-      const key = fingerprint(speaker, text);
-      const previousForNode = nodeEntries.get(block);
-      if (previousForNode && previousForNode.fingerprint === key) continue;
-
-      const now = Date.now();
-      if (previousForNode?.entry && previousForNode.speaker.toLowerCase() === speaker.toLowerCase()) {
-        const merged = MeetNotebookTranscript.mergeRollingText(previousForNode.entry.text, text);
-        previousForNode.entry.text = merged;
-        previousForNode.entry.updatedAt = now;
-        previousForNode.fingerprint = key;
-        nodeEntries.set(block, previousForNode);
-        seenCaptionFingerprints.set(key, now);
-        scheduleCommit(previousForNode.entry);
-        publish();
-        continue;
-      }
-
-      const seenAt = seenCaptionFingerprints.get(key);
-      if (seenAt && now - seenAt < 2500) {
-        nodeEntries.set(block, { speaker, fingerprint: key, entry: null });
-        continue;
-      }
-
-      const recentEntry = entries[entries.length - 1];
-      if (recentEntry &&
-          recentEntry.speaker.toLowerCase() === speaker.toLowerCase() &&
-          now - (recentEntry.updatedAt || now) < 90000 &&
-          MeetNotebookTranscript.isRollingUpdate(recentEntry.text, text)) {
-        recentEntry.text = MeetNotebookTranscript.mergeRollingText(recentEntry.text, text);
-        recentEntry.updatedAt = now;
-        nodeEntries.set(block, { speaker, fingerprint: key, entry: recentEntry });
-        seenCaptionFingerprints.set(key, now);
-        scheduleCommit(recentEntry);
-        publish();
-        continue;
-      }
-
-      const entry = { speaker, text, t: elapsed(), updatedAt: now, committed: false, source: 'meet' };
-      entries.push(entry);
-      nodeEntries.set(block, { speaker, fingerprint: key, entry });
-      seenCaptionFingerprints.set(key, now);
-
-      // Keep the deduplication cache bounded and remove stale captions.
-      for (const [fingerprintKey, timestamp] of seenCaptionFingerprints) {
-        if (now - timestamp > 15000) seenCaptionFingerprints.delete(fingerprintKey);
-        else if (seenCaptionFingerprints.size > 2000) seenCaptionFingerprints.delete(fingerprintKey);
-        if (seenCaptionFingerprints.size <= 2000 && now - timestamp <= 15000) break;
-      }
-      scheduleCommit(entry);
-      publish();
-    }
-  }
-
-  function attach() {
-    const captionRegion = region();
-    if (!captionRegion) return false;
-    if (hideNativeCaptions) setCaptionVisibility(true);
-    if (observer && observedRegion === captionRegion) return true;
-    observer?.disconnect();
-    observedRegion = captionRegion;
-    observer = new MutationObserver(scan);
-    observer.observe(captionRegion, { childList: true, characterData: true, subtree: true });
-    scan();
-    return true;
-  }
-
-  function participants() {
-    const output = new Set();
-    SELECTORS.tiles.forEach(selector => document.querySelectorAll(selector).forEach(element => {
-      const name = (element.getAttribute('aria-label') || element.getAttribute('data-self-name') || element.innerText || '')
-        .split(/[\n,]/)[0].trim();
-      if (name && name.length < 80) output.add(name);
-    }));
-    return [...output];
-  }
-
-  function cleanup() {
-    observer?.disconnect();
-    rootObserver?.disconnect();
-    clearInterval(persistTimer);
-    clearInterval(reattachTimer);
-    clearInterval(rosterTimer);
-    clearTimeout(publishTimer);
-    for (const timer of commitTimers.values()) clearTimeout(timer);
-    commitTimers.clear();
-    publishTimer = null;
-    observer = null;
-    observedRegion = null;
-    rootObserver = null;
-  }
-
-  function start(message) {
-    cleanup();
-    entries = [];
-    nodeEntries = new WeakMap();
-    seenCaptionFingerprints.clear();
-    publishQueue = Promise.resolve();
-    elapsedBeforePause = 0;
-    activeSegmentStart = performance.now();
-    sessionId = message.sessionId;
-    paused = false;
-    hideNativeCaptions = message.hideNativeCaptions !== false;
-    enableCaptions();
-    attach();
-    rootObserver = new MutationObserver(() => {
-      if (region()) attach();
-      else { observer?.disconnect(); observer = null; observedRegion = null; }
-    });
-    rootObserver.observe(document.documentElement, { childList: true, subtree: true });
-    reattachTimer = setInterval(() => { enableCaptions(); attach(); }, 1800);
-    persistTimer = setInterval(publish, 1000);
-    rosterTimer = setInterval(() => {
-      sendRuntimeMessage({ type: 'ROSTER_UPDATE', sessionId, participants: participants() });
-    }, 10000);
-  }
-
-  function pause() {
-    if (paused) return;
-    elapsedBeforePause += activeSegmentStart ? performance.now() - activeSegmentStart : 0;
-    activeSegmentStart = 0;
-    paused = true;
-    publish();
-  }
-
-  function resume() {
-    if (!paused) return;
-    paused = false;
-    activeSegmentStart = performance.now();
-    scan();
-  }
-
-  async function stop() {
-    if (!paused) {
-      elapsedBeforePause += activeSegmentStart ? performance.now() - activeSegmentStart : 0;
-      activeSegmentStart = 0;
-      paused = true;
-    }
-    for (const timer of commitTimers.values()) clearTimeout(timer);
-    commitTimers.clear();
-    entries.forEach(entry => { entry.committed = true; });
-    await flushPublish();
-    setCaptionVisibility(false);
-    cleanup();
-    return entries;
-  }
-
-  function diagnose() {
-    const captionRegion = region();
-    if (!captionRegion) return { found: false, html: '' };
-    const clone = captionRegion.cloneNode(true);
-    clone.querySelectorAll('*').forEach(element => {
-      [...element.attributes].forEach(attribute => {
-        if (!['class', 'role', 'aria-label', 'aria-live'].includes(attribute.name)) element.removeAttribute(attribute.name);
-      });
-      if (element.tagName === 'IMG') element.setAttribute('src', 'redacted');
-    });
-    const walker = document.createTreeWalker(clone, NodeFilter.SHOW_TEXT);
-    while (walker.nextNode()) walker.currentNode.nodeValue = '[redacted]';
-    return { found: true, html: clone.outerHTML.slice(0, 6000) };
-  }
-
-  chrome.runtime.onMessage.addListener((message, _sender, reply) => {
-    if (message.type === 'SET_CAPTION_VISIBILITY') { setCaptionVisibility(message.hidden); reply({ ok: true }); }
-    else if (message.type === 'START_TRANSCRIPT') { start(message); reply({ ok: true }); }
-    else if (message.type === 'STOP_TRANSCRIPT') { stop().then(entries => reply({ entries })).catch(error => reply({ entries: [], error: error.message || String(error) })); return true; }
-    else if (message.type === 'PAUSE_TRANSCRIPT') { pause(); reply({ ok: true }); }
-    else if (message.type === 'RESUME_TRANSCRIPT') { resume(); reply({ ok: true }); }
-    else if (message.type === 'DIAGNOSE') reply(diagnose());
-  });
+  let entries=[],observer=null,observedRegion=null,rootObserver=null,persistTimer=null,reattachTimer=null,rosterTimer=null,publishTimer=null;
+  let sessionId=null,elapsedBeforePause=0,activeSegmentStart=0,paused=false,hideNativeCaptions=true;
+  let nodeEntries=new WeakMap(),seenCaptionFingerprints=new Map(),publishQueue=Promise.resolve(),fallbackSpeakerIds=new Map();
+  const commitTimers=new Map(),originalCaptionStyles=new WeakMap();
+  const elapsed=()=>Math.max(0,Math.floor((elapsedBeforePause+(activeSegmentStart?performance.now()-activeSegmentStart:0))/1000));
+  function sendRuntimeMessage(message){try{if(typeof chrome==='undefined'||!chrome.runtime||!chrome.runtime.id)return Promise.resolve(null);return chrome.runtime.sendMessage(message).catch(()=>null);}catch(_){return Promise.resolve(null);}}
+  function region(){for(const selector of SELECTORS.regions){const el=document.querySelector(selector);if(el&&((el.getAttribute('aria-label')||'').toLowerCase().includes('caption')||(selector==='[aria-live]'&&el.querySelector('img,[role="img"]'))))return el;}return null;}
+  function setCaptionVisibility(hide){hideNativeCaptions=!!hide;const el=region();if(!el)return;if(!originalCaptionStyles.has(el))originalCaptionStyles.set(el,{opacity:el.style.getPropertyValue('opacity'),opacityPriority:el.style.getPropertyPriority('opacity'),pointerEvents:el.style.getPropertyValue('pointer-events'),pointerEventsPriority:el.style.getPropertyPriority('pointer-events')});if(hide){el.style.setProperty('opacity','0','important');el.style.setProperty('pointer-events','none','important');}else{const old=originalCaptionStyles.get(el);old.opacity?el.style.setProperty('opacity',old.opacity,old.opacityPriority):el.style.removeProperty('opacity');old.pointerEvents?el.style.setProperty('pointer-events',old.pointerEvents,old.pointerEventsPriority):el.style.removeProperty('pointer-events');}}
+  function enableCaptions(){const buttons=SELECTORS.buttons.flatMap(selector=>[...document.querySelectorAll(selector)]);if(buttons.some(b=>/turn off captions/i.test(b.getAttribute('aria-label')||'')))return true;const b=buttons.find(x=>/turn on captions/i.test(x.getAttribute('aria-label')||''));if(b){b.click();return true;}return false;}
+  const junk=/^(jump to bottom|caption settings|format size|settings|arrow_downward|more options|mic|volume up)$/i;
+  function cleanLines(el){return (el.innerText||el.textContent||'').split('\n').map(v=>v.trim()).filter(v=>v&&!junk.test(v)&&!/^[a-z]+(_[a-z]+)+$/i.test(v));}
+  function speakerLike(v){v=String(v||'').trim();return !!v&&v.length<=80&&!junk.test(v)&&!/^(you|your microphone|microphone|captions?)$/i.test(v)&&v.split(/\s+/).length<=8&&!/[.!?。！？]$/.test(v);}
+  function metadataSpeaker(card){for(const attr of ['data-speaker-name','data-author-name','aria-label','title']){const v=(card.getAttribute?.(attr)||'').trim();if(!v)continue;const m=v.match(/(?:speaker|participant|from)\s*[:—-]\s*(.+)$/i),candidate=(m?m[1]:v).trim();if(speakerLike(candidate))return candidate.replace(/\s*\(you\)\s*$/i,'').trim();}const node=card.querySelector?.('[data-speaker-name],[data-author-name],[aria-label*="speaker" i],[aria-label*="participant" i]');if(node&&node!==card){const v=(node.getAttribute('data-speaker-name')||node.getAttribute('data-author-name')||node.getAttribute('aria-label')||node.textContent||'').trim(),m=v.match(/(?:speaker|participant|from)\s*[:—-]\s*(.+)$/i),candidate=(m?m[1]:v).trim();if(speakerLike(candidate))return candidate.replace(/\s*\(you\)\s*$/i,'').trim();}return '';}
+  function captionBlocks(root){const candidates=new Set();for(const selector of SELECTORS.cards)root.querySelectorAll(selector).forEach(el=>candidates.add(el));root.querySelectorAll('img,[role="img"]').forEach(img=>{let el=img.parentElement;while(el&&el!==root){const ls=cleanLines(el);if(ls.length>=2&&ls.some(speakerLike)){candidates.add(el);break;}el=el.parentElement;}});const valid=[...candidates].filter(el=>{if(el===root)return false;const ls=cleanLines(el),meta=metadataSpeaker(el);return(meta&&ls.some(x=>x!==meta))||(ls.length>=2&&speakerLike(ls[0]));});return valid.filter(el=>!valid.some(child=>child!==el&&el.contains(child)));}
+  function parseCaptionCard(card){const ls=cleanLines(card);let speaker=metadataSpeaker(card),text='';if(speaker)text=ls.filter(x=>x!==speaker).join(' ').trim();else if(ls.length>=2&&speakerLike(ls[0])){speaker=ls[0].replace(/\s*\(you\)\s*$/i,'').trim();text=ls.slice(1).join(' ').trim();}if(!text)return null;if(!speaker){const id=card.getAttribute('data-speaker-id')||card.getAttribute('data-participant-id');if(id){if(!fallbackSpeakerIds.has(id))fallbackSpeakerIds.set(id,'Speaker '+(fallbackSpeakerIds.size+1));speaker=fallbackSpeakerIds.get(id);}}if(!speaker||!speakerLike(speaker)||text.length>2000)return null;return{speaker,text:text.replace(/\s+/g,' ').trim()};}
+  function fingerprint(speaker,text){return speaker.toLocaleLowerCase()+'|'+text.toLocaleLowerCase().normalize('NFKC').replace(/\s+/g,' ').trim();}
+  function scheduleCommit(entry){const old=commitTimers.get(entry);if(old)clearTimeout(old);entry.committed=false;commitTimers.set(entry,setTimeout(()=>{entry.committed=true;commitTimers.delete(entry);publish();},850));}
+  function flushPublish(){if(publishTimer){clearTimeout(publishTimer);publishTimer=null;}if(!sessionId)return publishQueue;const snapshot=entries.map(e=>({...e})),id=sessionId;publishQueue=publishQueue.then(()=>sendRuntimeMessage({type:'TRANSCRIPT_UPDATE',sessionId:id,entries:snapshot})).catch(()=>{});return publishQueue;}
+  function publish(){if(!sessionId||publishTimer)return;publishTimer=setTimeout(()=>{publishTimer=null;flushPublish();},120);}
+  function scan(){if(paused)return;const root=region();if(!root)return;for(const block of captionBlocks(root)){const parsed=parseCaptionCard(block);if(!parsed)continue;const {speaker,text}=parsed,key=fingerprint(speaker,text),previous=nodeEntries.get(block);if(previous&&previous.fingerprint===key)continue;const now=Date.now();if(previous?.entry&&previous.speaker.toLowerCase()===speaker.toLowerCase()){previous.entry.text=MeetNotebookTranscript.mergeRollingText(previous.entry.text,text);previous.entry.updatedAt=now;previous.fingerprint=key;nodeEntries.set(block,previous);seenCaptionFingerprints.set(key,now);scheduleCommit(previous.entry);publish();continue;}const seenAt=seenCaptionFingerprints.get(key);if(seenAt&&now-seenAt<2500){nodeEntries.set(block,{speaker,fingerprint:key,entry:null});continue;}const recent=entries[entries.length-1];if(recent&&recent.source==='meet'&&recent.speaker.toLowerCase()===speaker.toLowerCase()&&now-(recent.updatedAt||now)<90000&&MeetNotebookTranscript.isRollingUpdate(recent.text,text)){recent.text=MeetNotebookTranscript.mergeRollingText(recent.text,text);recent.updatedAt=now;nodeEntries.set(block,{speaker,fingerprint:key,entry:recent});seenCaptionFingerprints.set(key,now);scheduleCommit(recent);publish();continue;}const entry={speaker,text,t:elapsed(),updatedAt:now,committed:false,source:'meet'};entries.push(entry);nodeEntries.set(block,{speaker,fingerprint:key,entry});seenCaptionFingerprints.set(key,now);for(const [fp,ts] of seenCaptionFingerprints){if(now-ts>15000||seenCaptionFingerprints.size>2000)seenCaptionFingerprints.delete(fp);if(seenCaptionFingerprints.size<=2000&&now-ts<=15000)break;}scheduleCommit(entry);publish();}}
+  function attach(){const root=region();if(!root)return false;if(hideNativeCaptions)setCaptionVisibility(true);if(observer&&observedRegion===root)return true;observer?.disconnect();observedRegion=root;observer=new MutationObserver(scan);observer.observe(root,{childList:true,characterData:true,subtree:true});scan();return true;}
+  function participants(){const out=new Set();SELECTORS.tiles.forEach(sel=>document.querySelectorAll(sel).forEach(el=>{const name=(el.getAttribute('aria-label')||el.getAttribute('data-self-name')||el.innerText||'').split(/[\n,]/)[0].trim();if(name&&name.length<80)out.add(name);}));return[...out];}
+  function cleanup(){observer?.disconnect();rootObserver?.disconnect();clearInterval(persistTimer);clearInterval(reattachTimer);clearInterval(rosterTimer);clearTimeout(publishTimer);for(const timer of commitTimers.values())clearTimeout(timer);commitTimers.clear();publishTimer=null;observer=null;observedRegion=null;rootObserver=null;}
+  function start(message){cleanup();entries=[];nodeEntries=new WeakMap();seenCaptionFingerprints.clear();fallbackSpeakerIds.clear();publishQueue=Promise.resolve();elapsedBeforePause=0;activeSegmentStart=performance.now();sessionId=message.sessionId;paused=false;hideNativeCaptions=message.hideNativeCaptions!==false;enableCaptions();attach();rootObserver=new MutationObserver(()=>{if(region())attach();else{observer?.disconnect();observer=null;observedRegion=null;}});rootObserver.observe(document.documentElement,{childList:true,subtree:true});reattachTimer=setInterval(()=>{enableCaptions();attach();},1800);persistTimer=setInterval(publish,1000);rosterTimer=setInterval(()=>sendRuntimeMessage({type:'ROSTER_UPDATE',sessionId,participants:participants()}),10000);}
+  function pause(){if(paused)return;elapsedBeforePause+=activeSegmentStart?performance.now()-activeSegmentStart:0;activeSegmentStart=0;paused=true;publish();}
+  function resume(){if(!paused)return;paused=false;activeSegmentStart=performance.now();scan();}
+  async function stop(){if(!paused){elapsedBeforePause+=activeSegmentStart?performance.now()-activeSegmentStart:0;activeSegmentStart=0;paused=true;}for(const timer of commitTimers.values())clearTimeout(timer);commitTimers.clear();entries.forEach(e=>{e.committed=true;});await flushPublish();setCaptionVisibility(false);cleanup();return entries;}
+  function diagnose(){const root=region();if(!root)return{found:false,html:''};const clone=root.cloneNode(true);clone.querySelectorAll('*').forEach(el=>{[...el.attributes].forEach(a=>{if(!['class','role','aria-label','aria-live','data-speaker-id','data-participant-id','data-caption-id','data-message-id','data-speaker-name','data-author-name'].includes(a.name))el.removeAttribute(a.name);});if(el.tagName==='IMG')el.setAttribute('src','redacted');});const walker=document.createTreeWalker(clone,NodeFilter.SHOW_TEXT);while(walker.nextNode())walker.currentNode.nodeValue='[redacted]';return{found:true,html:clone.outerHTML.slice(0,12000)};}
+  chrome.runtime.onMessage.addListener((message,_sender,reply)=>{if(message.type==='SET_CAPTION_VISIBILITY'){setCaptionVisibility(message.hidden);reply({ok:true});}else if(message.type==='START_TRANSCRIPT'){start(message);reply({ok:true});}else if(message.type==='STOP_TRANSCRIPT'){stop().then(entries=>reply({entries})).catch(error=>reply({entries:[],error:error.message||String(error)}));return true;}else if(message.type==='PAUSE_TRANSCRIPT'){pause();reply({ok:true});}else if(message.type==='RESUME_TRANSCRIPT'){resume();reply({ok:true});}else if(message.type==='DIAGNOSE')reply(diagnose());});
 })();
