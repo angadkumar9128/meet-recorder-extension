@@ -1,5 +1,5 @@
 (() => {
-  const INSTANCE_TOKEN='meet-notebook-content-v1.7.0';
+  const INSTANCE_TOKEN='meet-notebook-content-v1.7.1';
   if(window.__meetNotebookLoaded===INSTANCE_TOKEN)return;
   window.__meetNotebookLoaded=INSTANCE_TOKEN;
   try{if(typeof chrome==='undefined'||!chrome.runtime||!chrome.runtime.id)return;}catch(_){return;}
@@ -39,7 +39,16 @@
     // Compatibility fallback: older Meet builds expose caption cards only as
     // direct children of the live caption region, without stable data/ARIA IDs.
     if(!candidates.size){const scope=root.firstElementChild||root;[...scope.children].forEach(el=>{if(cleanLines(el).length>=2)candidates.add(el);});}
-    const valid=[...candidates].filter(el=>{if(el===root)return false;const ls=cleanLines(el),meta=metadataSpeaker(el);return(meta&&ls.some(x=>x!==meta))||(ls.length>=2&&speakerLike(ls[0]));});
+    const valid=[...candidates].filter(el=>{
+      if(el===root)return false;
+      // Do not run generic line-count/metadata validation on the confirmed
+      // Meet card shape: captions may be rendered as one concatenated text
+      // line (or innerText may omit line breaks), even though the speaker and
+      // utterance are present in their own descendants.
+      if(el.matches?.('.nMcdL')&&el.querySelector('.NWpY1d')&&el.querySelector('.ygicle'))return true;
+      const ls=cleanLines(el),meta=metadataSpeaker(el);
+      return(meta&&ls.some(x=>x!==meta))||(ls.length>=2&&speakerLike(ls[0]));
+    });
     // Prefer each individual card; do not collapse sibling captions into a shared wrapper.
     return valid.filter(el=>!valid.some(child=>child!==el&&el.contains(child)));
   }
