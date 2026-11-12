@@ -296,6 +296,43 @@ Meet Notebook aims to improve transcript coverage, not guarantee a perfect trans
 
 For best results, keep the Meet tab open, enable Meet captions, select the same language in Meet and Meet Notebook, use a clear microphone, and reduce background noise and speaker echo.
 
+## Google Meet speaker-attribution regression: known fix
+
+This section records a previously verified fix so future changes do not reintroduce the same caption-capture failure.
+
+### Symptom
+
+Remote participants' captions may appear as **Unattributed audio** in the supplementary audio-backup transcript, even though Google Meet is displaying speaker-labelled captions. In this situation, first verify that the content script is observing the active Meet captions region. Do not start by widening audio timestamp matching or changing speaker-attribution heuristics.
+
+### Root cause
+
+Google Meet can keep more than one captions-like region in the DOM. An empty or inactive region may appear before the region containing the live caption cards. The old implementation used `document.querySelector()` and returned the first matching region, so the observer could attach to the wrong region and never receive the live speaker-labelled caption updates.
+
+### Known-good correction (version 1.7.3)
+
+The correction is in commit [`8ef1acc`](https://github.com/angadkumar9128/meet-recorder-extension/commit/8ef1acc281f39514ce744f69d25db4d8ddbe3373) (**Select the active Meet captions region reliably**):
+
+1. Enumerate all candidate regions with `document.querySelectorAll()` for the configured region selectors; do not return the first match.
+2. Treat a region as a candidate when it has a captions label, confirmed Meet caption-card content, or caption metadata.
+3. Prefer the current Meet card shape: `.nMcdL` containing both `.NWpY1d` (speaker name) and `.ygicle` (utterance text).
+4. Rank candidates using caption-card count, paired speaker/text descendants, caption metadata, avatar elements, and the captions aria-label. Observe the highest-scoring candidate.
+5. Keep the individual caption-card parsing logic separate from region selection. The speaker and utterance must be read from the same card so different participants are not accidentally paired.
+
+The accompanying version/token update is commit [`8e4d051`](https://github.com/angadkumar9128/meet-recorder-extension/commit/8e4d051fbd148765e5269479a515eeb7127ca4e7) (**Bump extension version to 1.7.3**). Both matter: changing the manifest version alone does not guarantee that an already-injected content script is replaced. Update the `INSTANCE_TOKEN` in `content.js` when a new content-script implementation must be injected into an existing Meet tab, then reload the extension and the Meet tab during verification.
+
+### Regression-debugging checklist
+
+When speaker-labelled Meet captions stop appearing or audio backup falls back to **Unattributed audio**:
+
+- Inspect the live DOM and confirm which region actually contains caption cards.
+- Confirm that the active region contains `.nMcdL` cards and that each card has the expected `.NWpY1d` speaker and `.ygicle` text descendants (Meet may change its DOM over time).
+- Confirm the observer is attached to that active region, not an earlier empty/inactive match.
+- Check that each parsed entry retains the speaker and text from the same card.
+- Check the content-script `INSTANCE_TOKEN`; an old injected script can remain active until the Meet tab is reloaded.
+- Only after confirming that speaker-labelled caption entries are reaching the extension should you investigate audio-backup timestamp matching or overlap ambiguity.
+
+**Important distinction:** this fix restores capture of Meet's speaker-labelled captions. It does not make speaker identification from mixed tab audio independently reliable. The audio-backup path still uses nearby Meet caption activity and may legitimately remain unattributed when caption activity is missing, delayed, or overlapping.
+
 ## Development and tests
 
 The extension has no build step. Load the repository folder directly as an unpacked extension.
