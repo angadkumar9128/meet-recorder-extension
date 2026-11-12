@@ -7,6 +7,7 @@ const stamp=ms=>{const d=new Date(ms);return d.getFullYear()+'-'+pad(d.getMonth(
 const codeFrom=url=>{try{return new URL(url).pathname.split('/').filter(Boolean).join('')||'meet';}catch{return 'meet';}};
 function elapsedNow(s){return Math.max(0,(s.elapsedMs||0)+(s.recording&&!s.paused&&s.segmentStartedAt?Date.now()-s.segmentStartedAt:0));}
 function mergeWithAuxiliary(meetEntries,storedEntries){const meet=(meetEntries||[]).map(e=>({...e,source:'meet'}));const auxiliary=(storedEntries||[]).filter(e=>{if(e.source==='note')return true;if(e.source!=='local-asr')return false;const normalized=normalizeSpeech(e.text);return !meet.some(m=>normalized&&normalizeSpeech(m.text)===normalized&&Math.abs((m.t||0)-(e.t||0))<=8);});return [...meet,...auxiliary].sort((a,b)=>(a.t||0)-(b.t||0));}
+function resolveAsrEntries(entries,samples,myName){const rows=entries.map(e=>({...e}));for(const e of rows){if(e.source!=='local-asr')continue;e.speaker=MeetNotebookTranscript.resolveSpeaker(e,samples,{myName});e.suppressedByMeet=e.channel==='tab'&&MeetNotebookTranscript.shouldSuppressAsr(e,rows.filter(m=>m.source==='meet'));e.echo=e.channel==='mic'&&MeetNotebookTranscript.isMicEcho(e,rows);}return rows;}
 function normalizeSpeech(s){return String(s||'').toLocaleLowerCase().normalize('NFKC').replace(/[^\p{L}\p{N}\s]/gu,'').replace(/\s+/g,' ').trim();}
 const transcriptMutationQueues=new Map();
 function enqueueTranscriptMutation(sessionId,work){
@@ -25,10 +26,10 @@ async function stopRecording(){
   const elapsedMs=elapsedNow(state);const stopped={...state,recording:false,paused:false,elapsedMs,segmentStartedAt:null,finalizing:true};
   await setState(stopped);await chrome.action.setBadgeText({text:''});
   await chrome.runtime.sendMessage({target:'offscreen',type:'STOP'}).catch(()=>{});
-  let entries=[];try{const r=await chrome.tabs.sendMessage(state.tabId,{type:'STOP_TRANSCRIPT'});entries=r.entries||[];}catch{}
+  let entries=[];try{const r=await sendTab(state.tabId,{type:'STOP_TRANSCRIPT'});entries=r.entries||[];}catch{}
   entries=await enqueueTranscriptMutation(state.sessionId,async()=>{
     const saved=await chrome.storage.local.get('transcript:'+state.sessionId);
-    const finalEntries=entries.length?mergeWithAuxiliary(entries,saved['transcript:'+state.sessionId]||[]):(saved['transcript:'+state.sessionId]||[]);
+    const activity=(await chrome.storage.local.get('activity:'+state.sessionId))['activity:'+state.sessionId]||[];const finalEntries=resolveAsrEntries(MeetNotebookTranscript.upsertById(saved['transcript:'+state.sessionId]||[],entries,'meet'),activity,state.myName);
     await saveSession(stopped,finalEntries,'finalizing');
     return finalEntries;
   });
@@ -70,9 +71,11 @@ chrome.runtime.onMessage.addListener((msg,sender,reply)=>{
         const s=await getState();const id=msg.sessionId||s.sessionId;if(!id)throw new Error('No active meeting session.');
         await enqueueTranscriptMutation(id,async()=>{
           const old=await chrome.storage.local.get('transcript:'+id);
-          const entries=mergeWithAuxiliary(msg.entries||[],old['transcript:'+id]||[]);
-          await chrome.storage.local.set({['transcript:'+id]:entries});
-          await saveSession({...s,sessionId:id},entries,s.recording?'recording':s.finalizing?'finalizing':'saved');
+          const entries=MeetNotebookTranscript.upsertById(old['transcript:'+id]||[],msg.entries||[],'meet');
+          const activityKey='activity:'+id,activityData=await chrome.storage.local.get(activityKey),samples=[...(activityData[activityKey]||[]),...(msg.samples||[])].slice(-3000);
+          const resolved=resolveAsrEntries(entries,samples,s.myName);
+          await chrome.storage.local.set({[activityKey]:samples,['transcript:'+id]:resolved});
+          await saveSession({...s,sessionId:id},resolved,s.recording?'recording':s.finalizing?'finalizing':'saved');
         });
         reply({ok:true});break;
       }
@@ -103,8 +106,9 @@ chrome.runtime.onMessage.addListener((msg,sender,reply)=>{
             if(!duplicate)entries.push(entry);
           }
           entries.sort((a,b)=>(a.t||0)-(b.t||0));
-          await chrome.storage.local.set({[key]:entries});
-          await saveSession({...s,sessionId:id},entries,s.recording?'recording':s.finalizing?'finalizing':'saved');
+          const activityData=await chrome.storage.local.get('activity:'+id),resolved=resolveAsrEntries(entries,activityData['activity:'+id]||[],s.myName);
+          await chrome.storage.local.set({[key]:resolved});
+          await saveSession({...s,sessionId:id},resolved,s.recording?'recording':s.finalizing?'finalizing':'saved');
           return {duplicate,merged};
         });
         reply({ok:true,...result});break;

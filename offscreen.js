@@ -2,7 +2,7 @@
 let recorder=null,tabStream=null,micStream=null,audioContext=null,sessionId=null,chunkIndex=0,chunkWrites=[],videoUrl=null;
 let levelTimer=null,micGainNode=null,micAnalyser=null,tabAnalyser=null,micData=null,tabData=null;
 let baseMicGain=2,autoGain=true,enhanceMic=true,activeElapsedMs=0,segmentStartedAt=0;
-let speechRecognizer=null,speechTrack=null,speechRestartTimer=null,speechEnabled=false,speechLanguage='en-US',speechQuality='command',speechPaused=false,speechSaveQueue=Promise.resolve(),speechInterimText='',speechRestartAttempts=0,speechFatalError=false,speechPartialId=null,speechPartialEntry=null;
+let speechEnabled=false,speechLanguage='en-US',speechQuality='conversation',speechSaveQueue=Promise.resolve(),asrChannels=[];
 const PRESETS={standard:{width:1280,height:720,bitrate:4000000},high:{width:1920,height:1080,bitrate:8000000},saver:{width:1280,height:720,bitrate:2000000}};
 function openDb(){return new Promise((resolve,reject)=>{const r=indexedDB.open('meet-notebook-media',2);r.onupgradeneeded=()=>{const db=r.result;if(!db.objectStoreNames.contains('chunks'))db.createObjectStore('chunks',{keyPath:['sessionId','index']});if(!db.objectStoreNames.contains('videos'))db.createObjectStore('videos',{keyPath:'sessionId'});};r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});}
 async function saveVideo(blob){const db=await openDb();return new Promise((resolve,reject)=>{const tx=db.transaction('videos','readwrite');tx.objectStore('videos').put({sessionId,blob,type:blob.type,savedAt:Date.now()});tx.oncomplete=()=>{db.close();resolve();};tx.onerror=()=>{db.close();reject(tx.error);};});}
@@ -12,6 +12,8 @@ async function clearChunks(){const db=await openDb();return new Promise((resolve
 function supportedMime(){const mp4='video/mp4;codecs=avc1.640028,mp4a.40.2';if(MediaRecorder.isTypeSupported(mp4))return mp4;const vp8='video/webm;codecs=vp8,opus';return MediaRecorder.isTypeSupported(vp8)?vp8:'video/webm';}
 function activeDuration(){return activeElapsedMs+(recorder&&recorder.state==='recording'&&segmentStartedAt?performance.now()-segmentStartedAt:0);}
 function audioTranscriptionStatus(message){chrome.runtime.sendMessage({type:'AUDIO_TRANSCRIPTION_STATUS',sessionId,error:message}).catch(()=>{});}
+function queueChannelEntry(entry){speechSaveQueue=speechSaveQueue.then(()=>chrome.runtime.sendMessage({type:'LOCAL_TRANSCRIPT_UPDATE',sessionId,entry})).catch(error=>audioTranscriptionStatus('Transcript save failed: '+(error?.message||error)));}
+async function stopAsrChannels(final=true){await Promise.all(asrChannels.map(c=>c.stop(final).catch(()=>{})));if(final)asrChannels=[];await speechSaveQueue;}
 function queueAudioTranscript(text,partial=false){
   const clean=String(text||'').replace(/\s+/g,' ').trim();if(!clean)return;
   if(partial&&!speechPartialId)speechPartialId=(crypto.randomUUID?crypto.randomUUID():'asr-'+Date.now()+'-'+Math.random().toString(36).slice(2));
@@ -103,7 +105,7 @@ async function repairWebm(input,durationMs){
 }
 async function start(msg){
   if(recorder&&recorder.state!=='inactive')throw new Error('Recorder is already active.');
-  sessionId=msg.sessionId;chunkIndex=0;chunkWrites=[];activeElapsedMs=0;segmentStartedAt=0;speechEnabled=msg.audioTranscription===true;speechLanguage=msg.speechLanguage||'en-US';speechQuality=['conversation','dictation','command'].includes(msg.speechQuality)?msg.speechQuality:'command';speechPaused=false;speechTrack=null;speechSaveQueue=Promise.resolve();speechInterimText='';speechRestartAttempts=0;speechFatalError=false;speechPartialId=null;speechPartialEntry=null;
+  sessionId=msg.sessionId;chunkIndex=0;chunkWrites=[];activeElapsedMs=0;segmentStartedAt=0;speechEnabled=msg.audioTranscription===true;speechLanguage=msg.speechLanguage||'en-US';speechQuality=['conversation','dictation','command'].includes(msg.speechQuality)?msg.speechQuality:'conversation';speechSaveQueue=Promise.resolve();asrChannels=[];
   baseMicGain=clamp(Number(msg.micGain)||2,.5,5);autoGain=msg.autoGain!==false;enhanceMic=msg.enhanceMic!==false;
   const preset=PRESETS[msg.quality]||PRESETS.high;
   tabStream=await navigator.mediaDevices.getUserMedia({audio:{mandatory:{chromeMediaSource:'tab',chromeMediaSourceId:msg.streamId}},video:{mandatory:{chromeMediaSource:'tab',chromeMediaSourceId:msg.streamId}}});
@@ -111,9 +113,9 @@ async function start(msg){
   try{await video.applyConstraints({width:{ideal:preset.width},height:{ideal:preset.height},frameRate:{ideal:30,max:30}});}catch(e){console.warn('Meet Notebook: capture constraints were not accepted.',e);}
   let micOk=true;const micAudio={echoCancellation:true,noiseSuppression:enhanceMic,autoGainControl:true,channelCount:1};try{micStream=await navigator.mediaDevices.getUserMedia({audio:{...micAudio,...(msg.micDeviceId?{deviceId:{exact:msg.micDeviceId}}:{})}});}catch(firstError){if(msg.micDeviceId){try{micStream=await navigator.mediaDevices.getUserMedia({audio:micAudio});}catch(e){micOk=false;console.warn('Meet Notebook: microphone unavailable.',e);}}else{micOk=false;console.warn('Meet Notebook: microphone unavailable.',firstError);}}
   audioContext=new AudioContext({sampleRate:48000});await audioContext.resume();
-  const destination=audioContext.createMediaStreamDestination(),mixBus=audioContext.createGain(),limiter=audioContext.createDynamicsCompressor();
+  const destination=audioContext.createMediaStreamDestination(),tabAsrDestination=audioContext.createMediaStreamDestination(),micAsrDestination=audioContext.createMediaStreamDestination(),mixBus=audioContext.createGain(),limiter=audioContext.createDynamicsCompressor();
   limiter.threshold.value=-8;limiter.knee.value=8;limiter.ratio.value=10;limiter.attack.value=.003;limiter.release.value=.22;
-  const tabSource=audioContext.createMediaStreamSource(tabStream),tabGain=audioContext.createGain();tabGain.gain.value=.9;tabSource.connect(tabGain);tabGain.connect(mixBus);tabGain.connect(audioContext.destination);
+  const tabSource=audioContext.createMediaStreamSource(tabStream),tabGain=audioContext.createGain();tabGain.gain.value=.9;tabSource.connect(tabGain);tabGain.connect(mixBus);tabGain.connect(tabAsrDestination);tabGain.connect(audioContext.destination);
   tabAnalyser=audioContext.createAnalyser();tabAnalyser.fftSize=512;tabGain.connect(tabAnalyser);tabData=new Float32Array(tabAnalyser.fftSize);
   if(micStream){
     const micSource=audioContext.createMediaStreamSource(micStream),highpass=audioContext.createBiquadFilter(),lowpass=audioContext.createBiquadFilter(),micComp=audioContext.createDynamicsCompressor();
@@ -122,7 +124,7 @@ async function start(msg){
     micComp.threshold.value=-28;micComp.knee.value=18;micComp.ratio.value=3.5;micComp.attack.value=.006;micComp.release.value=.24;
     micGainNode=audioContext.createGain();micGainNode.gain.value=baseMicGain;
     micAnalyser=audioContext.createAnalyser();micAnalyser.fftSize=512;micData=new Float32Array(micAnalyser.fftSize);
-    micSource.connect(highpass);highpass.connect(lowpass);lowpass.connect(micComp);micComp.connect(micGainNode);micGainNode.connect(mixBus);micSource.connect(micAnalyser);
+    micSource.connect(highpass);highpass.connect(lowpass);lowpass.connect(micComp);micComp.connect(micGainNode);micGainNode.connect(mixBus);micGainNode.connect(micAsrDestination);micSource.connect(micAnalyser);
   }else{micGainNode=null;micAnalyser=null;micData=null;}
   mixBus.connect(limiter);limiter.connect(destination);
   levelTimer=setInterval(monitorLevels,200);
@@ -133,16 +135,16 @@ async function start(msg){
   recorder.onerror=e=>console.error('MediaRecorder error',e.error);
   recorder.onstop=async()=>{const durationMs=Math.max(0,activeElapsedMs);try{await Promise.all(chunkWrites);const chunks=await readChunks();if(!chunks.length)throw new Error('No media chunks were saved.');let blob=new Blob(chunks.map(x=>x.blob),{type:chunks[0].type||mimeType});if(blob.type.includes('webm'))blob=await repairWebm(blob,durationMs);await saveVideo(blob);await clearChunks();videoUrl=URL.createObjectURL(blob);const result=await chrome.runtime.sendMessage({type:'VIDEO_READY',sessionId,mimeType:blob.type,url:videoUrl,size:blob.size,durationMs});if(!result||!result.ok)throw new Error(result&&result.error||'Video download failed.');}catch(err){chrome.runtime.sendMessage({type:'RECORDING_ERROR',sessionId,error:err.message}).catch(()=>{});}finally{cleanup();}};
   recorder.start(1000);segmentStartedAt=performance.now();
-  if(speechEnabled){speechTrack=mixedAudioTrack;launchAudioRecognition();}
+  if(speechEnabled){try{const Recognition=window.SpeechRecognition||window.webkitSpeechRecognition;if(!Recognition)throw new Error('SpeechRecognition unavailable');const C=MeetNotebookAsrChannel.AsrChannel,common={Recognition,language:speechLanguage,quality:speechQuality,getElapsed:()=>Math.floor(activeDuration()/1000),onEntry:queueChannelEntry,onStatus:audioTranscriptionStatus};const tabTrack=tabAsrDestination.stream.getAudioTracks()[0],micTrack=micAsrDestination.stream.getAudioTracks()[0];if(tabTrack){const c=new C({...common,channel:'tab',track:tabTrack});asrChannels.push(c);c.start();}if(micTrack&&micStream){const c=new C({...common,channel:'mic',track:micTrack});asrChannels.push(c);c.start();}if(!asrChannels.length)audioTranscriptionStatus('Local audio transcription unavailable; Meet captions remain active.');}catch(error){speechEnabled=false;audioTranscriptionStatus('Local audio transcription unavailable: '+(error.message||error)+'. Recording and Meet captions continue.');}}
   video.addEventListener('ended',()=>{if(recorder&&recorder.state!=='inactive'){if(recorder.state==='recording'&&segmentStartedAt)activeElapsedMs+=performance.now()-segmentStartedAt;segmentStartedAt=0;recorder.stop();}},{once:true});
   return {ok:true,micOk,mimeType,micGain:baseMicGain};
 }
-function cleanup(){stopAudioRecognition(true);speechEnabled=false;clearInterval(levelTimer);levelTimer=null;[tabStream,micStream].filter(Boolean).forEach(s=>s.getTracks().forEach(t=>t.stop()));tabStream=null;micStream=null;audioContext?.close();audioContext=null;recorder=null;micGainNode=null;micAnalyser=null;tabAnalyser=null;micData=null;tabData=null;sessionId=null;chunkWrites=[];segmentStartedAt=0;chrome.runtime.sendMessage({type:'AUDIO_LEVELS',mic:0,tab:0}).catch(()=>{});}
+function cleanup(){stopAsrChannels(true);speechEnabled=false;clearInterval(levelTimer);levelTimer=null;[tabStream,micStream].filter(Boolean).forEach(s=>s.getTracks().forEach(t=>t.stop()));tabStream=null;micStream=null;audioContext?.close();audioContext=null;recorder=null;micGainNode=null;micAnalyser=null;tabAnalyser=null;micData=null;tabData=null;sessionId=null;chunkWrites=[];segmentStartedAt=0;chrome.runtime.sendMessage({type:'AUDIO_LEVELS',mic:0,tab:0}).catch(()=>{});}
 chrome.runtime.onMessage.addListener((msg,_sender,reply)=>{if(msg.target!=='offscreen')return;(async()=>{try{
   if(msg.type==='START')reply(await start(msg));
-  else if(msg.type==='STOP'){speechEnabled=false;speechFatalError=true;await stopAudioRecognition(true);await speechSaveQueue;if(recorder&&recorder.state!=='inactive'){if(recorder.state==='recording'&&segmentStartedAt)activeElapsedMs+=performance.now()-segmentStartedAt;segmentStartedAt=0;recorder.stop();}reply({ok:true});}
-  else if(msg.type==='PAUSE'){if(recorder&&recorder.state==='recording'){if(segmentStartedAt)activeElapsedMs+=performance.now()-segmentStartedAt;segmentStartedAt=0;await stopAudioRecognition(false);await speechSaveQueue;recorder.pause();}reply({ok:true});}
-  else if(msg.type==='RESUME'){if(recorder&&recorder.state==='paused'){recorder.resume();segmentStartedAt=performance.now();speechPaused=false;launchAudioRecognition();}reply({ok:true});}
+  else if(msg.type==='STOP'){speechEnabled=false;await stopAsrChannels(true);if(recorder&&recorder.state!=='inactive'){if(recorder.state==='recording'&&segmentStartedAt)activeElapsedMs+=performance.now()-segmentStartedAt;segmentStartedAt=0;recorder.stop();}reply({ok:true});}
+  else if(msg.type==='PAUSE'){if(recorder&&recorder.state==='recording'){if(segmentStartedAt)activeElapsedMs+=performance.now()-segmentStartedAt;segmentStartedAt=0;asrChannels.forEach(c=>c.pause());await speechSaveQueue;recorder.pause();}reply({ok:true});}
+  else if(msg.type==='RESUME'){if(recorder&&recorder.state==='paused'){recorder.resume();segmentStartedAt=performance.now();asrChannels.forEach(c=>c.resume());}reply({ok:true});}
   else if(msg.type==='REVOKE_URL'){if(msg.url)URL.revokeObjectURL(msg.url);reply({ok:true});}
   else reply({ok:false,error:'Unknown offscreen operation.'});
 }catch(e){reply({ok:false,error:e.message||String(e)});}})();return true;});

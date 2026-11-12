@@ -3,7 +3,7 @@
 A local-first Google Meet recorder and meeting-notes extension for Chrome. Meet Notebook records meeting audio, captures speaker-labelled Google Meet captions, and can run a second speech-recognition pass on-device to help recover words that captions miss.
 
 ![Chrome Extension](https://img.shields.io/badge/Chrome-Manifest%20V3-4285F4?logo=googlechrome&logoColor=white)
-![Version](https://img.shields.io/badge/version-1.5.8-blue)
+![Version](https://img.shields.io/badge/version-1.6.0-blue)
 ![Processing](https://img.shields.io/badge/transcription-on--device-success)
 ![License](https://img.shields.io/badge/license-see%20repository-lightgrey)
 
@@ -29,7 +29,7 @@ Meet Notebook is designed to keep meeting capture and notes in your browser:
 
 - Record Google Meet tab audio, with optional microphone audio.
 - View live meeting captions in a Chrome side panel, retaining participant names supplied by Meet.
-- Optionally transcribe the combined meeting audio using Chrome's on-device Speech Recognition API.
+- Optionally transcribe the separate tab audio and microphone audio using Chrome's on-device Speech Recognition API.
 - Pause, resume, stop, and play back finalized recordings.
 - Search the transcript, add manual notes, and export meeting content.
 - Configure microphone input and sensitivity, recording quality, theme, language, and transcription options.
@@ -355,3 +355,12 @@ For caption-capture debugging, use **Copy caption diagnostics** from the popup o
 ---
 
 **Repository:** [angadkumar9128/meet-recorder-extension](https://github.com/angadkumar9128/meet-recorder-extension)
+
+
+### 1.6.0 — Speaker-aware, non-blocking local transcription
+
+- Isolates tab audio and microphone audio for separate local recognizers; the recording mix is never used for ASR.
+- Uses Meet caption activity timestamps to attribute remote ASR segments, and the configured name for microphone segments.
+- Uses stable caption IDs and incremental upserts so content-script updates cannot erase previously saved captions.
+- Local speech-model checks are no longer a prerequisite to Start. Model installation uses `processLocally: true` and waits for a downloading model to finish.
+- Recognizer result IDs include channel and session identity; interim results are finalized at pause/stop/end and normal restarts do not add a fixed delay.

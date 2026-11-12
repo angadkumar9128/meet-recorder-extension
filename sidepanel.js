@@ -13,7 +13,7 @@ function renderState(){
 }
 function render(){
   const root=$('transcript'),q=$('search').value.trim().toLowerCase();root.replaceChildren();
-  const rows=entries.filter(e=>!q||(e.speaker+' '+e.text).toLowerCase().includes(q));
+  const rows=MeetNotebookTranscript.mergeAdjacentTurns(entries.filter(e=>!e.suppressedByMeet&&!e.echo&&(!q||(e.speaker+' '+e.text).toLowerCase().includes(q))),state.myName).map(t=>({...t,speaker:t.name}));
   if(!rows.length){const p=document.createElement('p');p.className='empty';p.textContent='No transcript entries yet.';root.append(p);return;}
   for(const entry of rows){const card=document.createElement('article');card.className='turn'+(entry.committed?'':' current')+(entry.source==='local-asr'?' audio-backup':'')+(entry.partial?' partial':'');const head=document.createElement('div');head.className='turnhead';const avatar=document.createElement('span');avatar.className='avatar';avatar.textContent=entry.speaker.split(/\s+/).map(x=>x[0]).slice(0,2).join('').toUpperCase();const name=document.createElement('span');name.className='speaker';name.textContent=entry.speaker;const source=document.createElement('span');source.className='source-tag';source.textContent=entry.source==='local-asr'?'Audio backup':entry.source==='meet'?'Meet caption':entry.source||'';const time=document.createElement('span');time.className='time';time.textContent=fmt((entry.t||0)*1000)+(entry.partial?' · live partial':'');head.append(avatar,name,source,time);const p=document.createElement('p');p.textContent=entry.text;card.append(head,p);root.append(card);}
   if(scrollLatest)root.scrollTop=root.scrollHeight;
@@ -57,10 +57,10 @@ async function checkLocalSpeechModel(lang,install=false,preferredQuality='conver
     // "downloading" means Chrome may already be fetching it.
     setSpeechModelStatus('Installing '+lang+' ('+quality+' quality)…');
     let installed=false;
-    try{installed=await SR.install({langs:[lang],quality});}
+    try{installed=await SR.install({langs:[lang],processLocally:true,quality});}
     catch(error){failures.push(quality+': '+(error.message||error));continue;}
     let verified='unknown';
-    try{verified=await SR.available(options);}catch(error){failures.push(quality+': verification failed — '+(error.message||error));continue;}
+    try{verified=await SR.available(options);for(let attempt=0;verified==='downloading'&&attempt<30;attempt++){await new Promise(resolve=>setTimeout(resolve,1000));verified=await SR.available(options);}}catch(error){failures.push(quality+': verification failed — '+(error.message||error));continue;}
     if(installed&&verified==='available'){
       setSpeechModelStatus(quality==='command'?'Installed: '+lang+' (command quality). This is the basic tier and may miss continuous meeting speech.':'Installed and verified: '+lang+' ('+quality+' quality).');
       return quality;
@@ -82,8 +82,8 @@ async function playback(id){
   try{const blob=await readVideo(id);if(!blob)throw new Error('Playback file is not available in local storage for this meeting.');if(playerUrl)URL.revokeObjectURL(playerUrl);playerUrl=URL.createObjectURL(blob);$('player').src=playerUrl;$('playbackPanel').hidden=false;$('player').load();$('playbackPanel').scrollIntoView({behavior:'smooth',block:'nearest'});$('status').textContent='Recording ready. Use the video timeline to seek.';}catch(e){$('status').textContent=e.message;}
 }
 $('start').onclick=async()=>{
-  try{const tab=await activeMeet();const settings=await chrome.storage.local.get(['myName','quality','micGain','autoGain','enhanceMic','micDeviceId','audioTranscription','captionLanguage','speechQuality','hideMeetCaptions']);const speechQuality=settings.audioTranscription!==false?await checkLocalSpeechModel(settings.captionLanguage||'en-US',false,settings.speechQuality||'conversation'):'command';const streamId=await chrome.tabCapture.getMediaStreamId({targetTabId:tab.id});
-    const r=await request('START',{tabId:tab.id,streamId,myName:settings.myName,quality:settings.quality||'high',micGain:settings.micGain??2,autoGain:settings.autoGain!==false,enhanceMic:settings.enhanceMic!==false,micDeviceId:settings.micDeviceId||null,hideMeetCaptions:settings.hideMeetCaptions!==false,audioTranscription:settings.audioTranscription!==false,speechLanguage:settings.captionLanguage||'en-US',speechQuality});
+  try{const tab=await activeMeet();const settings=await chrome.storage.local.get(['myName','quality','micGain','autoGain','enhanceMic','micDeviceId','audioTranscription','captionLanguage','speechQuality','hideMeetCaptions']);const speechQuality=settings.speechQuality||'conversation';const audioTranscription=settings.audioTranscription!==false;const streamId=await chrome.tabCapture.getMediaStreamId({targetTabId:tab.id});
+    const r=await request('START',{tabId:tab.id,streamId,myName:settings.myName,quality:settings.quality||'high',micGain:settings.micGain??2,autoGain:settings.autoGain!==false,enhanceMic:settings.enhanceMic!==false,micDeviceId:settings.micDeviceId||null,hideMeetCaptions:settings.hideMeetCaptions!==false,audioTranscription,speechLanguage:settings.captionLanguage||'en-US',speechQuality});
     sessionId=r.sessionId;await refresh();if(!r.micOk)$('status').textContent='Recording started, but microphone access was denied. Open Settings → Test microphone / grant access, then start a new recording.';else if(!r.transcriptOk)$('status').textContent='Recording started, but Meet captions could not be attached. Reload the Meet tab and try again.';
   }catch(e){$('status').textContent=e.message;}
 };

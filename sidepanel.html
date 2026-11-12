@@ -22,8 +22,8 @@
 <button id="installSpeechPack">Install / check local speech model</button>
 <p id="speechModelStatus" class="hint" role="status" aria-live="polite">Choose a language and install its local model. Chrome selects the highest quality supported by your device; command quality is a basic phrase model and is not optimized for continuous meetings.</p>
 <button id="micSetup">Test microphone / grant access</button>
-<p class="hint">Meet captions provide speaker names. A separate on-device recognizer transcribes the combined meeting audio to help recover speech that Meet captions miss. Its transcript is labelled Live Audio Transcript as a separate audio-backup source. Names in the main transcript come from Meet's individual caption cards. Install the selected Chrome language model once before recording. No API key, server or external account is used. Sensitivity and voice enhancement affect the recorded audio.</p>
+<p class="hint">Meet captions provide speaker names. Optional local on-device recognition uses separate tab-audio and microphone tracks. Meet caption activity provides remote speaker names; local recognition is best-effort and never blocks recording or caption capture. No API key, server or external account is used. Sensitivity and voice enhancement affect the recorded audio.</p>
 <p class="privacy">Recordings and transcripts stay in this browser. Tell all participants before recording.</p>
 <button id="save" class="primary">Save settings</button><button id="diagnostics">Copy caption diagnostics</button>
 </main>
-<script src="sidepanel.js"></script></body></html>
+<script src="lib/transcript.js"></script><script src="sidepanel.js"></script></body></html>
