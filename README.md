@@ -201,13 +201,17 @@ flowchart TD
     B --> C[Meet caption capture]
     C --> D[background.js service worker]
     A --> E[Chrome tabCapture]
-    F[Optional microphone] --> G[Web Audio mixing]
+    F[Optional microphone] --> G[Web Audio processing]
     E --> G
     G --> H[offscreen.js]
     H --> I[MediaRecorder]
     I --> J[IndexedDB chunks]
-    H --> K[On-device Speech Recognition]
-    K --> L[Live Audio Transcript]
+    H --> K[Tab-only ASR]
+    H --> P[Mic-only ASR]
+    C --> Q[Meet speaker activity]
+    K --> L[Speaker attribution]
+    P --> L
+    Q --> L
     D --> M[sidepanel.js]
     C --> M
     L --> M
@@ -226,7 +230,8 @@ flowchart TD
 | `sidepanel.html`, `sidepanel.css`, `sidepanel.js` | Notebook interface, transcript display, settings, session browsing, playback, notes, and exports |
 | `popup.html`, `popup.js` | Toolbar popup controls for quick start/stop and diagnostics |
 | `setup.html`, `setup.js` | Microphone permission, input selection, and input-level test |
-| `lib/transcript.js` | Shared transcript merging, rolling-caption handling, speaker-turn formatting, and local-ASR deduplication |
+| `lib/transcript.js` | Shared transcript upserts, Meet/audio coverage deduplication, speaker attribution, rolling-caption handling, and export-turn formatting |
+| `lib/asr-channel.js` | Independent tab/microphone recognizer lifecycle, session-safe result IDs, partial finalization, and restart handling |
 | `tests/`, `lib/transcript.test.js` | Regression tests for transcript merging and deduplication |
 
 ## Project structure
@@ -237,10 +242,13 @@ meet-recorder-extension/
 │   └── workflows/
 │       └── extension-checks.yml
 ├── lib/
+│   ├── asr-channel.js
 │   ├── transcript.js
 │   └── transcript.test.js
 ├── tests/
+│   ├── asr-channel.test.js
 │   ├── local-asr-dedupe.test.js
+│   ├── speaker-attribution.test.js
 │   └── transcript-merge.test.js
 ├── background.js
 ├── content.js
