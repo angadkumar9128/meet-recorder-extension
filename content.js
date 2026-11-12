@@ -49,7 +49,7 @@
     const meetName=card.querySelector?.('.NWpY1d')?.textContent?.trim()||'';
     const meetText=card.querySelector?.('.ygicle')?.textContent?.trim()||'';
     if(meetName&&meetText&&speakerLike(meetName)&&meetText.length<=2000){
-      return{speaker:meetName.replace(/\\s*\\(you\\)\\s*$/i,'').trim(),text:meetText.replace(/\\s+/g,' ').trim()};
+      return{speaker:meetName.replace(/\s*\\(you\\)\\s*$/i,'').trim(),text:meetText.replace(/\s+/g,' ').trim()};
     }
     const ls=cleanLines(card),metadata=metadataSpeaker(card);let parsed=MeetNotebookTranscript.parseCaptionLines(ls,metadata),speaker=parsed?.speaker||'',text=parsed?.text||'';if(!parsed&&metadata&&ls.length){speaker=metadata;text=ls.filter(x=>x!==metadata).join(' ').trim();}if(!text)return null;if(!speaker){const id=card.getAttribute('data-speaker-id')||card.getAttribute('data-participant-id')||card.parentElement?.getAttribute('data-speaker-id')||card.parentElement?.getAttribute('data-participant-id');if(id){if(!fallbackSpeakerIds.has(id))fallbackSpeakerIds.set(id,'Speaker '+(fallbackSpeakerIds.size+1));speaker=fallbackSpeakerIds.get(id);}}if(!speaker||!speakerLike(speaker)||text.length>2000)return null;return{speaker,text:text.replace(/\s+/g,' ').trim()};}
   function fingerprint(speaker,text){return speaker.toLocaleLowerCase()+'|'+text.toLocaleLowerCase().normalize('NFKC').replace(/\s+/g,' ').trim();}
