@@ -3,7 +3,7 @@
 A local-first Google Meet recorder and meeting-notes extension for Chrome. Meet Notebook records meeting audio, captures speaker-labelled Google Meet captions, and can run a second speech-recognition pass on-device to help recover words that captions miss.
 
 ![Chrome Extension](https://img.shields.io/badge/Chrome-Manifest%20V3-4285F4?logo=googlechrome&logoColor=white)
-![Version](https://img.shields.io/badge/version-1.6.0-blue)
+![Version](https://img.shields.io/badge/version-1.7.0-blue)
 ![Processing](https://img.shields.io/badge/transcription-on--device-success)
 ![License](https://img.shields.io/badge/license-see%20repository-lightgrey)
 
@@ -53,15 +53,15 @@ When enabled and supported, Chrome's local Speech Recognition API runs two indep
 - **Tab channel:** receives only Google Meet tab audio, containing remote participants.
 - **Microphone channel:** receives only the local microphone signal, attributed to the configured name in Settings.
 
-The mixed audio track is reserved for the recording. It is never sent to the recognizer. Meet caption activity timestamps associate tab-channel speech with the dominant non-self caption speaker active around that utterance. Participant names always come from Meet captions; audio attribution is best-effort when captions are delayed or participants interrupt one another.
+The mixed audio track is reserved for the recording. It is never sent to the recognizer. Meet caption activity timestamps associate tab-channel speech with the dominant non-self caption speaker active near that utterance. The attribution window is deliberately narrow; when multiple speakers are equally plausible, the extension labels the audio **Unattributed audio** rather than inventing a participant name. Participant names always come from Meet captions; audio attribution remains best-effort when captions are delayed or participants interrupt one another.
 
 - Recognition uses processLocally = true.
 - Local ASR is optional. A missing or unavailable language model does not prevent Start, recording, or Meet-caption capture.
 - ASR segments use channel/session/result identifiers, and interim text is finalized when recognition ends or recording pauses/stops.
 - Audio segments substantially covered by a same-speaker Meet caption are hidden from the visible transcript to avoid duplicate lines. Uncovered audio text is retained under the inferred speaker.
-- Microphone segments use the local name from Settings. If no remote caption activity is close enough, the fallback is **Remote participant**.
+- Microphone segments use the local name from Settings. If no nearby speaker activity is sufficiently clear, the fallback is **Unattributed audio**; the extension does not guess a person's name.
 
-The conversation, dictation, and command tiers are Chrome model quality options. Command is a basic phrase model and is not recommended for continuous meeting transcription. Model availability varies by Chrome version, device, language, and policy.
+The recognizer requests up to three hypotheses and selects the highest-confidence alternative. Tab audio is conditioned with a speech-focused high-pass/low-pass filter and dynamic-range compression before recognition. The conversation, dictation, and command tiers are Chrome model quality options. Command is a basic phrase model and is not recommended for continuous meeting transcription. Model availability varies by Chrome version, device, language, and policy.
 
 ### Speech model quality matters
 
@@ -279,6 +279,9 @@ Meet Notebook is designed for local-first use:
 **Always tell every participant before recording.** Obtain any consent required by applicable law, workplace policy, and the meeting organizer. Do not record meetings without authorization.
 
 ## Accuracy and known limitations
+
+- Google Meet captions are the primary source for participant names and speaker-labelled words. The extension reads the caption UI; if Meet does not expose a caption card or speaker label, no browser extension can reliably infer that participant's name from a single mixed tab-audio stream without a dedicated diarization model.
+- Chrome on-device speech recognition is a best-effort secondary source. Multiple hypotheses and voice-focused audio conditioning can help, but no local browser model guarantees a verbatim transcript. Accuracy depends on language/model quality, microphone quality, accents, crosstalk, background noise, and network/Chrome behavior.
 
 Meet Notebook aims to improve transcript coverage, not guarantee a perfect transcript.
 
