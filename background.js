@@ -1,4 +1,11 @@
-importScripts('lib/transcript.js');
+// Resolve the shared transcript helper from this extension's own package root.
+const transcriptScriptUrl = chrome.runtime.getURL('lib/transcript.js');
+try {
+  importScripts(transcriptScriptUrl);
+} catch (error) {
+  console.error('Meet Notebook: required file lib/transcript.js could not be loaded. Reinstall the complete extension folder; do not load a ZIP with a nested or incomplete folder.', transcriptScriptUrl, error);
+  throw error;
+}
 
 const getState=async()=>((await chrome.storage.session.get('state')).state)||{recording:false,paused:false,elapsedMs:0};
 const setState=state=>chrome.storage.session.set({state});
@@ -52,7 +59,7 @@ chrome.runtime.onMessage.addListener((msg,sender,reply)=>{
         const state={recording:true,paused:false,tabId:tab.id,sessionId,startedAt,segmentStartedAt:Date.now(),elapsedMs:0,myName:msg.myName||'You',code:codeFrom(tab.url),stamp:stamp(startedAt),quality:msg.quality||'high'};
         await setState(state);
         await chrome.action.setBadgeBackgroundColor({color:'#d93025'});await chrome.action.setBadgeText({text:'REC'});
-        reply({ok:true,micOk:capture.micOk,transcriptOk,sessionId});break;
+        reply({ok:true,micOk:capture.micOk,micError:capture.micError||null,transcriptOk,sessionId});break;
       }
       case 'STOP':reply(await stopRecording());break;
       case 'PAUSE':{
