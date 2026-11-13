@@ -111,7 +111,24 @@ async function start(msg){
   tabStream=await navigator.mediaDevices.getUserMedia({audio:{mandatory:{chromeMediaSource:'tab',chromeMediaSourceId:msg.streamId}},video:{mandatory:{chromeMediaSource:'tab',chromeMediaSourceId:msg.streamId}}});
   const video=tabStream.getVideoTracks()[0];if(!video)throw new Error('Meet did not provide a video track.');video.contentHint='detail';
   try{await video.applyConstraints({width:{ideal:preset.width},height:{ideal:preset.height},frameRate:{ideal:30,max:30}});}catch(e){console.warn('Meet Notebook: capture constraints were not accepted.',e);}
-  let micOk=true;const micAudio={echoCancellation:true,noiseSuppression:enhanceMic,autoGainControl:true,channelCount:1};try{micStream=await navigator.mediaDevices.getUserMedia({audio:{...micAudio,...(msg.micDeviceId?{deviceId:{exact:msg.micDeviceId}}:{})}});}catch(firstError){if(msg.micDeviceId){try{micStream=await navigator.mediaDevices.getUserMedia({audio:micAudio});}catch(e){micOk=false;console.warn('Meet Notebook: microphone unavailable.',e);}}else{micOk=false;console.warn('Meet Notebook: microphone unavailable.',firstError);}}
+  let micOk=false,micError=null;const micAudio={echoCancellation:true,noiseSuppression:enhanceMic,autoGainControl:true,channelCount:1};
+  if(!navigator.mediaDevices||typeof navigator.mediaDevices.getUserMedia!=='function'){
+    micError='Microphone capture is not available in this Chrome context.';
+  }else{
+    try{
+      micStream=await navigator.mediaDevices.getUserMedia({audio:{...micAudio,...(msg.micDeviceId?{deviceId:{exact:msg.micDeviceId}}:{})}});
+      micOk=!!micStream;
+    }catch(firstError){
+      const retryable=!!msg.micDeviceId&&['NotFoundError','OverconstrainedError','AbortError'].includes(firstError?.name);
+      if(retryable){
+        try{micStream=await navigator.mediaDevices.getUserMedia({audio:micAudio});micOk=!!micStream;}
+        catch(fallbackError){micError=(fallbackError?.name||'MicrophoneError')+': '+(fallbackError?.message||'Microphone access failed.');}
+      }else{
+        micError=(firstError?.name||'MicrophoneError')+': '+(firstError?.message||'Microphone access failed.');
+      }
+    }
+  }
+  if(!micOk)console.warn('Meet Notebook: microphone unavailable; continuing with Meet tab audio only.',micError);
   audioContext=new AudioContext({sampleRate:48000});await audioContext.resume();
   const destination=audioContext.createMediaStreamDestination(),tabAsrDestination=audioContext.createMediaStreamDestination(),micAsrDestination=audioContext.createMediaStreamDestination(),mixBus=audioContext.createGain(),limiter=audioContext.createDynamicsCompressor();
   limiter.threshold.value=-8;limiter.knee.value=8;limiter.ratio.value=10;limiter.attack.value=.003;limiter.release.value=.22;
@@ -137,7 +154,7 @@ async function start(msg){
   recorder.start(1000);segmentStartedAt=performance.now();
   if(speechEnabled){try{const Recognition=window.SpeechRecognition||window.webkitSpeechRecognition;if(!Recognition)throw new Error('SpeechRecognition unavailable');const C=MeetNotebookAsrChannel.AsrChannel,common={Recognition,language:speechLanguage,quality:speechQuality,getElapsed:()=>Math.floor(activeDuration()/1000),onEntry:queueChannelEntry,onStatus:audioTranscriptionStatus};const tabTrack=tabAsrDestination.stream.getAudioTracks()[0],micTrack=micAsrDestination.stream.getAudioTracks()[0];if(tabTrack){const c=new C({...common,channel:'tab',track:tabTrack});asrChannels.push(c);c.start();}if(micTrack&&micStream){const c=new C({...common,channel:'mic',track:micTrack});asrChannels.push(c);c.start();}if(!asrChannels.length)audioTranscriptionStatus('Local audio transcription unavailable; Meet captions remain active.');}catch(error){speechEnabled=false;audioTranscriptionStatus('Local audio transcription unavailable: '+(error.message||error)+'. Recording and Meet captions continue.');}}
   video.addEventListener('ended',()=>{if(recorder&&recorder.state!=='inactive'){if(recorder.state==='recording'&&segmentStartedAt)activeElapsedMs+=performance.now()-segmentStartedAt;segmentStartedAt=0;recorder.stop();}},{once:true});
-  return {ok:true,micOk,mimeType,micGain:baseMicGain};
+  return {ok:true,micOk,micError,mimeType,micGain:baseMicGain};
 }
 function cleanup(){stopAsrChannels(true);speechEnabled=false;clearInterval(levelTimer);levelTimer=null;[tabStream,micStream].filter(Boolean).forEach(s=>s.getTracks().forEach(t=>t.stop()));tabStream=null;micStream=null;audioContext?.close();audioContext=null;recorder=null;micGainNode=null;micAnalyser=null;tabAnalyser=null;micData=null;tabData=null;sessionId=null;chunkWrites=[];segmentStartedAt=0;chrome.runtime.sendMessage({type:'AUDIO_LEVELS',mic:0,tab:0}).catch(()=>{});}
 chrome.runtime.onMessage.addListener((msg,_sender,reply)=>{if(msg.target!=='offscreen')return;(async()=>{try{
