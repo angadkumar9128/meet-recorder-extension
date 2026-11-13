@@ -50,7 +50,7 @@ $('start').onclick = async () => {
     const res = await chrome.runtime.sendMessage({ type: 'START', tabId: tab.id, streamId, myName });
     if (!res?.ok) throw new Error(res?.error || 'Failed to start');
     let note = 'Recording started.';
-    if (!res.micOk) note += ' Mic not allowed - only others will be heard.';
+    if (!res.micOk) note += ' Microphone unavailable (' + (res.micError || 'permission not granted') + '). Open Test microphone / grant access, allow access, then start a new recording.';
     if (!res.transcriptOk) note += ' Reload the Meet tab for transcript.';
     $('msg').textContent = note;
     render(await chrome.runtime.sendMessage({ type: 'GET_STATE' }));
