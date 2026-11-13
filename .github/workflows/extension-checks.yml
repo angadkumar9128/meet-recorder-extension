@@ -1,4 +1,4 @@
-name: Extension checks
+name: Extension checks and package
 
 on:
   push:
@@ -23,7 +23,54 @@ jobs:
           node --check offscreen.js
           node --check sidepanel.js
           node --check setup.js
+          node --check popup.js
+          node --check lib/transcript.js
+          node --check lib/asr-channel.js
       - name: Run transcript tests
         run: node --test
-      - name: Validate extension manifest
-        run: python -c "import json; json.load(open('manifest.json', encoding='utf-8'))"
+      - name: Validate manifest and every packaged resource
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import path from 'node:path';
+          const manifest = JSON.parse(fs.readFileSync('manifest.json', 'utf8'));
+          const required = [
+            manifest.background?.service_worker,
+            manifest.side_panel?.default_path,
+            ...(manifest.content_scripts || []).flatMap((entry) => entry.js || []),
+            'offscreen.html', 'offscreen.js', 'popup.html', 'popup.js',
+            'setup.html', 'setup.js', 'sidepanel.html', 'sidepanel.js',
+            'sidepanel.css', 'lib/transcript.js', 'lib/asr-channel.js'
+          ].filter(Boolean);
+          for (const file of required) {
+            if (!fs.existsSync(file) || !fs.statSync(file).isFile()) {
+              throw new Error('Required extension file is missing: ' + file);
+            }
+          }
+          for (const html of ['offscreen.html', 'popup.html', 'setup.html', 'sidepanel.html']) {
+            const source = fs.readFileSync(html, 'utf8');
+            for (const match of source.matchAll(/<script[^>]+src=["']([^"']+)["']/g)) {
+              const file = path.normalize(path.join(path.dirname(html), match[1]));
+              if (!fs.existsSync(file)) throw new Error(html + ' references missing script: ' + file);
+            }
+          }
+          const worker = fs.readFileSync(manifest.background.service_worker, 'utf8');
+          if (!worker.includes("chrome.runtime.getURL('lib/transcript.js')")) {
+            throw new Error('Service worker must load the shared transcript helper from the extension package.');
+          }
+          console.log('All manifest, HTML, service-worker, and shared-library resources are present.');
+          NODE
+      - name: Build installable extension ZIP (manifest at ZIP root)
+        run: |
+          mkdir -p dist
+          zip -r dist/Meet-Notebook-Chrome-Extension.zip \
+            manifest.json background.js content.js offscreen.html offscreen.js \
+            popup.html popup.js setup.html setup.js \
+            sidepanel.html sidepanel.css sidepanel.js lib
+      - name: Upload installable extension ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: Meet-Notebook-Chrome-Extension
+          path: dist/Meet-Notebook-Chrome-Extension.zip
+          if-no-files-found: error
+          retention-days: 30
